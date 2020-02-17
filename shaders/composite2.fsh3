@@ -1,0 +1,736 @@
+#version 120
+
+/*
+ _______ _________ _______  _______  _
+(  ____ \\__   __/(  ___  )(  ____ )( )
+| (    \/   ) (   | (   ) || (    )|| |
+| (_____    | |   | |   | || (____)|| |
+(_____  )   | |   | |   | ||  _____)| |
+      ) |   | |   | |   | || (      (_)
+/\____) |   | |   | (___) || )       _
+\_______)   )_(   (_______)|/       (_)
+
+Do not modify this code until you have read the LICENSE.txt contained in the root directory of this shaderpack!
+
+*/
+
+/////////////////////////CONFIGURABLE VARIABLES////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////CONFIGURABLE VARIABLES////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+/////////////////////////END OF CONFIGURABLE VARIABLES/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////END OF CONFIGURABLE VARIABLES/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+#include "Common.inc"
+
+#define GI_RESOLUTION_REDUCTION 9.0 // Render resolution reduction of GI. 1.0 = Original. Set higher for faster but blurrier GI. [1.0 4.0 9.0 16.0 25.0]
+
+#define WATER_REFRACT_IOR 1.2
+
+#define TORCHLIGHT_FILL 1.0 // Amount of fill/ambient light to add to torchlight falloff. Higher values makes torchlight dim less intensely based on distance. [0.5 1.0 2.0 4.0 8.0]
+
+#define TORCHLIGHT_BRIGHTNESS 1.0 // Brightness of torch light. [0.5 1.0 2.0 3.0 4.0]
+
+#define TAA_ENABLED // Temporal Anti-Aliasing. Utilizes multiple rendered frames to reconstruct an anti-aliased image similar to supersampling. Can cause some artifacts.
+	#define SHADOW_TAA
+
+
+const bool gaux3MipmapEnabled = true;
+const bool gaux1MipmapEnabled = false;
+
+
+uniform sampler2D gcolor;
+uniform sampler2D gdepth;
+uniform sampler2D depthtex1;
+uniform sampler2D gdepthtex;
+uniform sampler2D gnormal;
+uniform sampler2D composite;
+uniform sampler2D gaux1;
+uniform sampler2D gaux2;
+uniform sampler2D gaux3;
+
+varying vec4 texcoord;
+varying vec3 lightVector;
+varying vec3 upVector;
+
+uniform float near;
+uniform float far;
+uniform float viewWidth;
+uniform float viewHeight;
+uniform float rainStrength;
+uniform float frameTimeCounter;
+
+uniform mat4 gbufferProjection;
+uniform mat4 gbufferProjectionInverse;
+uniform mat4 gbufferModelViewInverse;
+
+uniform int   isEyeInWater;
+uniform ivec2 eyeBrightnessSmooth;
+
+varying vec3 colorSunlight;
+varying vec3 colorSkylight;
+varying vec3 colorTorchlight;
+
+varying vec3 worldLightVector;
+varying vec3 worldSunVector;
+
+uniform int heldBlockLightValue;
+
+uniform int frameCounter;
+
+uniform vec2 taaJitter;
+
+varying float heldLightBlacklist;
+
+/////////////////////////FUNCTIONS/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////FUNCTIONS/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+vec4 GetViewPosition(in vec2 coord, in float depth) 
+{
+#ifdef TAA_ENABLED
+	coord += taaJitter;
+#endif
+
+	vec4 fragposition = gbufferProjectionInverse * vec4(coord.s * 2.0f - 1.0f, coord.t * 2.0f - 1.0f, 2.0f * depth - 1.0f, 1.0f);
+		 fragposition /= fragposition.w;
+
+	
+	return fragposition;
+}
+
+vec4 GetViewPositionRaw(in vec2 coord, in float depth) 
+{
+	vec4 fragposition = gbufferProjectionInverse * vec4(coord.s * 2.0f - 1.0f, coord.t * 2.0f - 1.0f, 2.0f * depth - 1.0f, 1.0f);
+		 fragposition /= fragposition.w;
+
+	
+	return fragposition;
+}
+
+float 	ExpToLinearDepth(in float depth)
+{
+	return 2.0f * near * far / (far + near - (2.0f * depth - 1.0f) * (far - near));
+}
+
+
+float GetMaterialMask(const in int ID, in float matID) 
+{
+	//Catch last part of sky
+	if (matID > 254.0f) 
+	{
+		matID = 0.0f;
+	}
+
+	if (matID == ID) 
+	{
+		return 1.0f;
+	} 
+	else 
+	{
+		return 0.0f;
+	}
+}
+
+float CurveBlockLightSky(float blockLight)
+{
+
+	blockLight = 1.0 - pow(1.0 - blockLight, 0.45);
+	blockLight *= blockLight * blockLight;
+
+	return blockLight;
+}
+
+float CurveBlockLightTorch(float blockLight)
+{
+	float decoded = pow(blockLight, 1.0 / 0.25);
+
+	decoded = pow(decoded, 2.0) * 5.0;
+	decoded += pow(decoded, 0.4) * 0.1 * TORCHLIGHT_FILL;
+
+	return decoded;
+}
+
+float GetDepthLinear(in vec2 coord) 
+{					
+	return (near * far) / (texture2D(depthtex1, coord).x * (near - far) + far);
+}
+
+vec3 GetNormals(vec2 coord)
+{
+	return DecodeNormal(texture2D(gnormal, coord).xy);
+}
+
+float GetDepth(vec2 coord)
+{
+	return texture2D(depthtex1, coord).x;
+}
+
+/////////////////////////STRUCTS///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////STRUCTS///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct GbufferData
+{
+	vec3 albedo;
+	vec3 normal;
+	float depth;
+	vec2 mcLightmap;
+	float smoothness;
+	float metallic;
+	float emissive;
+	float materialID;
+	vec4 transparentAlbedo;
+	float parallaxShadow;
+};
+
+
+struct MaterialMask
+{
+	float sky;
+	float land;
+	float grass;
+	float leaves;
+	float hand;
+	float entityPlayer;
+	float water;
+	float stainedGlass;
+	float ice;
+	float torch;
+	float lava;
+	float glowstone;
+	float fire;
+};
+
+/////////////////////////STRUCT FUNCTIONS//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////STRUCT FUNCTIONS//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+GbufferData GetGbufferData()
+{
+	GbufferData data;
+
+
+	vec3 gbuffer0 = texture2D(gcolor, texcoord.st).rgb;
+	vec4 gbuffer1 = texture2D(gdepth, texcoord.st).rgba;
+	vec2 gbuffer2 = texture2D(gnormal, texcoord.st).rg;
+	vec3 gbuffer3 = texture2D(composite, texcoord.st).rgb;
+	float depth = texture2D(depthtex1, texcoord.st).x;
+
+
+	data.albedo = GammaToLinear(gbuffer0);
+
+	data.mcLightmap = gbuffer1.rg;
+	data.mcLightmap.g = CurveBlockLightSky(data.mcLightmap.g);
+	data.mcLightmap.r = CurveBlockLightTorch(data.mcLightmap.r);
+	data.emissive = gbuffer1.b;
+
+	data.normal = DecodeNormal(gbuffer2);
+
+
+	data.smoothness = gbuffer3.r;
+	data.metallic = gbuffer3.g;
+	data.materialID = gbuffer3.b;
+
+	data.depth = depth;
+
+	data.transparentAlbedo = texture2D(gaux2, texcoord.st);
+
+	data.parallaxShadow = gbuffer1.a;
+
+	return data;
+}
+
+MaterialMask CalculateMasks(float materialID)
+{
+	MaterialMask mask;
+
+	materialID *= 255.0;
+
+	mask.sky = GetMaterialMask(0, materialID);
+
+
+
+	mask.land 			= GetMaterialMask(1, materialID);
+	mask.grass 			= GetMaterialMask(2, materialID);
+	mask.leaves 		= GetMaterialMask(3, materialID);
+	mask.hand 			= GetMaterialMask(4, materialID);
+	mask.entityPlayer 	= GetMaterialMask(5, materialID);
+	mask.water 			= GetMaterialMask(6, materialID);
+	mask.stainedGlass	= GetMaterialMask(7, materialID);
+	mask.ice 			= GetMaterialMask(8, materialID);
+
+	mask.torch 			= GetMaterialMask(30, materialID);
+	mask.lava 			= GetMaterialMask(31, materialID);
+	mask.glowstone 		= GetMaterialMask(32, materialID);
+	mask.fire 			= GetMaterialMask(33, materialID);
+
+	return mask;
+}
+
+
+vec4 BilateralUpsample(in float depth, in vec3 normal)
+{
+	vec2 recipres = vec2(1.0f / viewWidth, 1.0f / viewHeight);
+	float zoom = 1.0f / GI_RESOLUTION_REDUCTION;
+	if (zoom < 0.0f || zoom > 1.0f)
+	{
+		zoom = 1.0f;
+	}
+	float offset = (zoom == 1.0f) ? 0.0 : (0.25f / zoom);
+
+	vec4 light = vec4(0.0f);
+	float weights = 0.0f;
+
+	for (float i = -0.5f; i <= 0.5f; i += 1.0f)
+	{
+		for (float j = -0.5f; j <= 0.5f; j += 1.0f)
+		{
+			vec2 coord = vec2(i, j) * recipres * 2.0f;
+
+			float sampleDepth = GetDepthLinear(texcoord.st + coord * 2.0f * exp2(offset));
+			vec3 sampleNormal = GetNormals(texcoord.st + coord * 2.0f * exp2(offset));
+
+			float weight = clamp(1.0f - abs(sampleDepth - depth) / 2.0f, 0.0f, 1.0f);
+				  weight *= max(0.0f, dot(sampleNormal, normal) * 2.0f - 1.0f);
+
+			light += pow(texture2DLod(gaux3, texcoord.st * sqrt(zoom) + coord, 1), vec4(vec3(2.2f), 1.0f)) * weight;
+
+			weights += weight;
+		}
+	}
+
+
+	light /= max(0.00001f, weights);
+
+	if (weights < 0.01f)
+	{
+		light =	pow(texture2DLod(gaux3, (texcoord.st) * sqrt(zoom), 2), vec4(vec3(2.2f), 1.0f));
+	}
+
+	return light;
+}
+
+vec4 GetGI(vec3 albedo, vec3 normal, float depth, float skylight)
+{
+
+	depth = ExpToLinearDepth(depth);
+
+	vec4 indirectLight = BilateralUpsample(depth, normal);
+
+	if(rainStrength <= 0.99)
+	{
+		float value = length(indirectLight.rgb);
+
+		indirectLight.rgb = pow(value, 0.7) * normalize(indirectLight.rgb + 0.0001) * 1.44;
+		indirectLight.rgb *= albedo * mix(colorSunlight, vec3(0.4) * Luminance(colorSkylight), rainStrength);
+		indirectLight.rgb *= saturate(skylight * 7.0);
+	}
+
+	return indirectLight;
+}
+
+vec3  	GetWaterNormals(in vec2 coord) {				//Function that retrieves the screen space surface normals. Used for lighting calculations
+	return DecodeNormal(texture2D(gaux1, coord).xy);
+}
+
+
+void WaterFog(inout vec3 color, in MaterialMask mask, float waterSkylight, vec4 viewSpacePositionSolid, vec4 viewSpacePosition)
+{
+	if (mask.water > 0.5 || isEyeInWater > 0 || mask.ice > 0.5)
+	{
+
+		vec3 viewVector = normalize(viewSpacePosition.xyz);
+
+
+		float waterDepth = distance(viewSpacePosition.xyz, viewSpacePositionSolid.xyz);
+		if (isEyeInWater > 0)
+		{
+			waterDepth = length(viewSpacePosition.xyz) * 0.5;		
+			if (mask.water > 0.5 || mask.ice > 0.5)
+			{
+				waterDepth = length(viewSpacePosition.xyz) * 0.5;		
+			}	
+		}
+
+
+		float fogDensity = 0.20;
+
+
+
+		vec3 waterNormal = normalize(GetWaterNormals(texcoord.st));
+
+		vec3 waterFogColor = vec3(0.05, 0.8, 1.0) * 2.0; //clear water
+			if (mask.ice > 0.5)
+			{
+				waterFogColor = vec3(0.2, 0.6, 1.0) * 7.0;
+				fogDensity = 0.7;
+			}
+			  waterFogColor *= 0.01 * dot(vec3(0.33333), colorSunlight);
+			  waterFogColor *= (1.0 - rainStrength * 0.95);
+			  waterFogColor *= isEyeInWater * 2.0 + 1.0;
+
+
+
+		if (isEyeInWater == 0)
+		{
+			waterFogColor *= waterSkylight;
+		}
+		else
+		{
+			waterFogColor *= 0.5;
+			//waterFogColor *= pow(eyeBrightnessSmooth.y / 240.0f, 6.0f);
+
+
+			vec3 waterSunlightVector = refract(-lightVector, upVector, 1.0 / WATER_REFRACT_IOR);
+
+			float scatter = 1.0 / (pow(saturate(dot(waterSunlightVector, viewVector) * 0.5 + 0.5) * 20.0, 1.0) + 0.1);
+			vec3 waterSunlightScatter = colorSunlight * scatter * 1.0 * waterFogColor * 16.0;
+
+			float eyeWaterDepth = eyeBrightnessSmooth.y / 240.0;
+
+
+			waterFogColor *= dot(viewVector, upVector) * 0.5 + 0.5;
+			waterFogColor = waterFogColor * pow(eyeWaterDepth, 1.0f) + waterSunlightScatter * pow(eyeWaterDepth, 1.0);
+		
+
+			waterFogColor *= pow(vec3(0.4, 0.72, 1.0) * 0.99, vec3(0.2 + (1.0 - eyeWaterDepth)));
+
+			fogDensity *= 0.5;
+		}
+
+
+		float visibility = 1.0f / (pow(exp(waterDepth * fogDensity), 1.0f));
+		float visibility2 = 1.0f / (pow(exp(waterDepth * fogDensity), 1.0f));
+
+
+		// float scatter = CalculateSunglow(surface);
+
+		vec3 viewVectorRefracted = refract(viewVector, waterNormal, 1.0 / 1.3333);
+		float scatter = 1.0 / (pow(saturate(dot(-lightVector, viewVectorRefracted) * 0.5 + 0.5) * 20.0, 2.0) + 0.1);
+
+		if (isEyeInWater < 1)
+		{
+			waterFogColor = mix(waterFogColor, colorSunlight * 21.0 * waterFogColor, vec3(scatter * (1.0 - rainStrength)));
+		}
+
+		color *= pow(vec3(0.4, 0.75, 1.0) * 0.99, vec3(waterDepth * 0.25 + 0.25));
+		color = mix(waterFogColor * 40.0, color, saturate(visibility));
+
+	}
+}
+
+vec3 ProjectBack(vec3 cameraSpace) 
+{
+    vec4 clipSpace = gbufferProjection * vec4(cameraSpace, 1.0);
+    vec3 NDCSpace = clipSpace.xyz / clipSpace.w;
+    vec3 screenSpace = 0.5 * NDCSpace + 0.5;
+		 //screenSpace.z = 0.1f;
+    return screenSpace;
+}
+
+float ScreenSpaceShadow(vec3 origin, MaterialMask mask)
+{
+	if (mask.sky > 0.5 || rainStrength >= 0.999)
+	{
+		return 1.0;
+	}
+
+	if (isEyeInWater > 0.5)
+	{
+		origin.xy /= 0.82;
+	}
+
+	vec3 viewDir = normalize(origin.xyz);
+
+
+	float nearCutoff = 0.5;
+	float nearCutoff2 = 12.0;
+	float traceBias = 0.015;
+
+
+	//Prevent self-intersection issues
+	float viewDirDiff = dot(fwidth(viewDir), vec3(0.333333));
+
+
+	vec3 rayPos = origin;
+	vec3 rayDir = lightVector * 0.01;
+	rayDir *= viewDirDiff * 1500.001;
+
+	vec3 rayDir2 = rayDir;
+
+	rayDir *= -origin.z * 0.28 + nearCutoff;
+	rayDir2 *= -origin.z * 0.28 + nearCutoff2;
+
+	rayDir = mix(rayDir, rayDir2, vec3(0.45));
+
+
+	rayPos += rayDir * -origin.z * 0.000037 * traceBias;
+
+
+#ifdef TAA_ENABLED
+	float randomness = rand(texcoord.st + sin(frameTimeCounter)).x;
+#else
+	float randomness = 0.0;
+#endif
+
+	rayPos += rayDir * randomness;
+
+
+
+	float zThickness = 0.1 * -origin.z;
+
+	float shadow = 1.0;
+
+	int numSamples = 2;
+
+
+	float shadowStrength = 1.0;
+
+	if (mask.grass > 0.5)
+	{
+		shadowStrength = 0.444;
+	}
+	if (mask.leaves > 0.5)
+	{
+		shadowStrength = 0.556;
+	}
+
+
+	for (int i = 0; i < numSamples; i++)
+	{
+		float fi = float(i) / float(numSamples);
+
+		rayPos += rayDir;
+
+		vec3 rayProjPos = ProjectBack(rayPos);
+
+
+		rayProjPos *= -1.0;
+	#ifdef TAA_ENABLED
+		rayProjPos.xy += taaJitter;
+	#endif
+		rayProjPos *= -1.0;
+
+
+		vec3 samplePos = GetViewPositionRaw(rayProjPos.xy, GetDepth(rayProjPos.xy)).xyz;
+
+		float depthDiff = samplePos.z - rayPos.z - 0.02 * -origin.z * traceBias;
+
+		if (depthDiff > 0.0 && depthDiff < zThickness)
+		{
+			shadow *= 1.0 - shadowStrength;
+		}
+	}
+
+	return pow(shadow, 2.5f);
+}
+
+
+float G1V(float dotNV, float k)
+{
+	return 1.0 / (dotNV * (1.0 - k) + k);
+}
+
+vec3 SpecularGGX(vec3 N, vec3 V, vec3 L, float roughness, float F0)
+{
+	float alpha = roughness * roughness;
+
+	vec3 H = normalize(V + L);
+
+	float dotNL = saturate(dot(N, L));
+	float dotNV = saturate(dot(N, V));
+	float dotNH = saturate(dot(N, H));
+	float dotLH = saturate(dot(L, H));
+
+	float F, D, vis;
+
+	float alphaSqr = alpha * alpha;
+	float pi = 3.14159265359;
+	float denom = dotNH * dotNH * (alphaSqr - 1.0) + 1.0;
+	D = alphaSqr / (pi * denom * denom);
+
+	float dotLH5 = pow(1.0f - dotLH, 5.0);
+	F = F0 + (1.0 - F0) * dotLH5;
+
+	float k = alpha / 2.0;
+	vis = G1V(dotNL, k) * G1V(dotNV, k);
+
+	vec3 specular = vec3(dotNL * D * F * vis) * colorSunlight;
+
+	//specular = vec3(0.1);
+	specular *= saturate(pow(1.0 - roughness, 0.7) * 2.0);
+
+	return specular;
+}
+
+/////////////////////////MAIN//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////MAIN//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void main() 
+{
+
+
+//===========================================================================================================
+	GbufferData gbuffer 			= GetGbufferData();
+	MaterialMask materialMask 		= CalculateMasks(gbuffer.materialID);
+
+	if (materialMask.stainedGlass > 0.5)
+	{
+		if (gbuffer.transparentAlbedo.a >= 0.9)
+		{
+			gbuffer.depth = texture2D(gdepthtex, texcoord.st).x;
+			gbuffer.normal = DecodeNormal(texture2D(gaux1, texcoord.st).xy);
+			gbuffer.albedo.rgb = GammaToLinear(gbuffer.transparentAlbedo.rgb);
+
+			vec2 transparentLightmap = texture2D(composite, texcoord.st).rg;
+			gbuffer.mcLightmap.x = CurveBlockLightTorch(transparentLightmap.x);
+			gbuffer.mcLightmap.y = CurveBlockLightSky(transparentLightmap.y);
+
+			materialMask.sky = 0.0;
+
+
+		}
+
+		gbuffer.smoothness = 0.0;
+		gbuffer.metallic = 0.0;
+	}
+
+	if (materialMask.water > 0.5)
+	{
+		gbuffer.smoothness = 0.0;
+		gbuffer.metallic = 0.0;
+	}
+//===========================================================================================================
+	vec4 viewPos            = GetViewPosition(texcoord.st, gbuffer.depth);
+	vec4 viewPosTransparent = GetViewPosition(texcoord.st, texture2D(gdepthtex, texcoord.st).x);
+
+	if (isEyeInWater > 0.5)
+	{
+		viewPos.xy *= 0.80;
+	}
+
+	vec4 worldPos					= gbufferModelViewInverse * vec4(viewPos.xyz, 0.0);
+	vec3 worldDir 					= normalize(worldPos.xyz);
+	vec3 worldNormal 				= normalize((gbufferModelViewInverse * vec4(gbuffer.normal, 0.0)).xyz);
+	vec3 worldTransparentNormal 	= normalize((gbufferModelViewInverse * vec4(GetWaterNormals(texcoord.st), 0.0)).xyz);
+//===========================================================================================================
+	vec3 finalComposite = vec3(0.0);
+
+	gbuffer.albedo *= 1.0 + materialMask.water * 0.2;
+	gbuffer.albedo *= 1.0 + materialMask.stainedGlass * 0.2;
+
+
+//===========================================================================================================
+	//GI
+	vec4 gi = GetGI(gbuffer.albedo, gbuffer.normal, gbuffer.depth, gbuffer.mcLightmap.g);
+	// vec4 gi = vec4(0.0, 0.0, 0.0, 1.0);
+
+	vec3 fakeGI = normalize(gbuffer.albedo + 0.0001) * pow(length(gbuffer.albedo), 1.0) * colorSunlight * 0.13 * gbuffer.mcLightmap.g;
+	float fakeGIFade = saturate((shadowDistance * 0.1 * 1.2) - length(viewPos) * 0.1);
+
+	gi.rgb = mix(fakeGI, gi.rgb, vec3(fakeGIFade));
+	float ao = gi.a;
+//===========================================================================================================
+
+
+
+	//Torchlight
+	const float torchlightBrightness = 3.7 * TORCHLIGHT_BRIGHTNESS;
+	vec3 torchLight = gbuffer.albedo * colorTorchlight;
+
+
+	finalComposite += gbuffer.mcLightmap.r * torchLight * 0.5 * ao * torchlightBrightness;
+
+	//held torch light
+	float heldLightFalloff = 1.0 / (pow(length(worldPos.xyz), 2.0) + 0.5);
+	finalComposite += torchLight * heldLightFalloff * heldBlockLightValue * 0.025 * torchlightBrightness * ao * heldLightBlacklist;
+
+	if (materialMask.glowstone > 0.5)
+	{
+		finalComposite += torchLight * 5.0 * pow(length(gbuffer.albedo.rgb), 2.0);
+	}
+	if (materialMask.lava > 0.5)
+	{
+		finalComposite += torchLight * 5.0 * pow(length(gbuffer.albedo.rgb), 1.0);
+	}
+	if (materialMask.torch > 0.5)
+	{
+		finalComposite += torchLight * 5.0 * saturate(pow(length(gbuffer.albedo.rgb) - 0.5, 1.0));
+	}
+
+
+//===========================================================================================================
+
+
+
+
+	if(rainStrength <= 0.99) {
+		//Sunlight specular
+		vec3 specularGGX = SpecularGGX(worldNormal, -worldDir, worldLightVector, pow(1.0 - pow(gbuffer.smoothness, 1.0), 1.0), gbuffer.metallic * 0.98 + 0.02) * sunlightMult * shadow;//KEEP
+		specularGGX *= pow(gbuffer.mcLightmap.g, 0.1);//KEEP
+
+		if (isEyeInWater < 0.5)
+		{
+			finalComposite += specularGGX;//KEEP
+		}
+
+
+		//GI
+		finalComposite += gi.rgb * 1.0 * sunlightMult;
+	}
+
+
+//===========================================================================================================
+
+	//Refraction of unterwater surface and total internal reflection detection for water
+	if (isEyeInWater > 0 && materialMask.water > 0.5)
+	{
+		worldDir = refract(worldDir, worldTransparentNormal, WATER_REFRACT_IOR);
+	}
+
+
+//===========================================================================================================
+
+	//sky
+	if (materialMask.sky > 0.5 || (isEyeInWater > 0 || materialMask.ice > 0.5 || materialMask.stainedGlass > 0.5) && gbuffer.depth > 0.9999999)
+	// if (materialMask.sky > 0.5)
+	{
+		//remove sun texture
+		gbuffer.albedo *= 1.0 - saturate((dot(worldDir, worldSunVector) - 0.95) * 50.0);//KEEP
+
+
+		worldPos.xyz = worldDir.xyz * 2670.0;
+	}
+
+
+//===========================================================================================================
+
+	//If total internal reflection, make black
+	float totalInternalReflection = 0.0;//KEEP
+	if (length(worldDir) < 0.5)
+	{
+		finalComposite *= 0.0;//KEEP
+		totalInternalReflection = 1.0;//KEEP
+	}
+
+
+
+//===========================================================================================================
+
+
+	WaterFog(finalComposite, materialMask, gbuffer.mcLightmap.g, viewPos, viewPosTransparent);
+
+//===========================================================================================================
+
+
+
+	finalComposite = LinearToGamma(finalComposite);
+	finalComposite += rand(texcoord.st + sin(frameTimeCounter)) * (1.0 / 65535.0);
+//===========================================================================================================
+	vec4 gnormalData = texture2D(gnormal, texcoord.st);
+/* DRAWBUFFERS:26 */
+	gl_FragData[0] = vec4(gnormalData.xy, totalInternalReflection, 1.0);
+	gl_FragData[1] = vec4(finalComposite.rgb, 1.0);
+//===========================================================================================================
+}
