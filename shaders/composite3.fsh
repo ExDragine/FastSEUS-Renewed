@@ -349,7 +349,7 @@ vec3 GetWavesNormal(vec3 position, float time) {
 	coord.x = coord.x * ((viewWidth - 1 * texelScale) / viewWidth) + ((0.5 * texelScale) / viewWidth);
 	coord.y = coord.y * ((viewHeight - 1 * texelScale) / viewHeight) + ((0.5 * texelScale) / viewHeight);
 
-	coord *= 0.1995f;
+	coord *= 0.1992f;
 
 	//coord.xy = clamp(coord.xy, (0.5 / vec2(viewWidth, viewHeight)), 1.0 - (0.5 / vec2(viewWidth, viewHeight)));
 

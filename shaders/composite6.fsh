@@ -231,12 +231,10 @@ void main() {
 
 	float motionVectorDiff = (abs(motionVectorMagnitude - prevColor.a));
 
-
-	vec3 minColor = vec3(1000000.0,1000000.0,1000000.0);
-	vec3 maxColor = vec3(0.0,0.0,0.0);
 	vec3 avgColor = vec3(0.0,0.0,0.0);
 	vec3 avgX = vec3(0.0);
 	vec3 avgY = vec3(0.0);
+
 
 	int c = 0;
 
@@ -248,10 +246,8 @@ void main() {
 	{
 		for (int j = -1; j <= 1; j++)
 		{
-			vec2 offs = (vec2(float(i), float(j)) / vec2(viewWidth, viewHeight)) * 0.7;
+			vec2 offs = (vec2(float(i), float(j)) / vec2(viewWidth, viewHeight)) * 1.0;
 			vec3 samp = pow(texture2D(gaux3, texcoord.xy + offs).rgb, vec3(COLORPOW));
-			minColor = min(minColor, samp);
-			maxColor = max(maxColor, samp);
 			avgColor += samp;
 
 			if (j == 0)
@@ -264,7 +260,7 @@ void main() {
 				avgY += samp;
 			}
 
-			samp = (RGBToYUV(samp));
+			samp = RGBToYUV(samp);
 
 			m1 += samp;
 			m2 += samp * samp;
@@ -320,12 +316,10 @@ void main() {
 
 
 
-	blendWeight += vec3(pixelMotionFactor * 0.0);
-
 
 	//blendWeight = mix(blendWeight, 1.0, clamp(motionVectorDiff * 40.0, 0.0, 1.0));
 
-	blendWeight = clamp(blendWeight, vec3(0.0), vec3(1.0));
+	blendWeight = saturate(blendWeight);
 
 	if (depth < 0.7)
 	{

@@ -499,7 +499,7 @@ vec3 GetWavesNormal(vec3 position) {
 	coord.x = coord.x * ((viewWidth - 1 * texelScale) / viewWidth) + ((0.5 * texelScale) / viewWidth);
 	coord.y = coord.y * ((viewHeight - 1 * texelScale) / viewHeight) + ((0.5 * texelScale) / viewHeight);
 
-	coord *= 0.1995f;
+	coord *= 0.1992f;
 
 	vec3 normal;
 	if (coord.s <= 1.0f && coord.s >= 0.0f
@@ -601,13 +601,15 @@ vec3 CalculateSunlightVisibility(vec4 screenSpacePosition, MaterialMask mask) {	
 		worldposition = shadowProjection * worldposition;
 		worldposition /= worldposition.w;
 
+	#ifdef SHADOW_TAA
+		worldposition /= worldposition.w;
+		worldposition.xy += taaJitter;
+		worldposition *= worldposition.w;
+	#endif
+
 		float dist = length(worldposition.xy);
 		float distortFactor = (1.0f - SHADOW_MAP_BIAS) + dist * SHADOW_MAP_BIAS;
 		worldposition.xy *= 0.95f / distortFactor;
-
-	#ifdef SHADOW_TAA
-		worldposition.xy += taaJitter;
-	#endif
 
 		worldposition.z = mix(worldposition.z, 0.5, 0.8);
 		worldposition = worldposition * 0.5f + 0.5f;		//Transform from shadow space to shadow map coordinates
@@ -1140,7 +1142,7 @@ if (envCoord.s <= 1.0f && envCoord.s >= 0.0f
 		sunlight *= pow(gbuffer.mcLightmap, 0.1 + isEyeInWater * 0.4);
 
 		vec3 shadow = CalculateSunlightVisibility(viewPos, materialMask);
-			 shadow *= gbuffer.parallaxShadow;
+			 //shadow *= gbuffer.parallaxShadow;
 
 		finalComposite += sunlight * shadow * sunlightMult * colorSunlight;
 	}

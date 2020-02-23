@@ -272,17 +272,13 @@ float CurveBlockLightTorch(float blockLight)
 
 vec3 GetRainAnimationTex(sampler2D tex, vec2 uv, float wet)
 {
-	//float frame = mod(floor(float(frameCounter) * 1.0), 60.0);
-	// frame = 0.0;
-
 	float frame = mod(floor(frameTimeCounter * 60.0), 60.0);
 	vec2 coord = vec2(uv.x, mod(uv.y / 60.0, 1.0) - frame / 60.0);
 
 	vec3 n = texture2D(tex, coord).rgb * 2.0 - 1.0;
 	n.y *= -1.0;
 
-	n.xy = pow(abs(n.xy) * 1.0, vec2(2.0 - wet * wet * wet * 1.2)) * sign(n.xy);
-	// n.xy = pow(abs(n.xy) * 1.0, vec2(1.0)) * sign(n.xy);
+	n.xy = pow(abs(n.xy), vec2(2.0 - wet * wet * wet * 1.2)) * sign(n.xy);
 
 	return n;
 }
@@ -325,34 +321,22 @@ vec3 GetRainNormal(in vec3 pos, vec3 norm, float wet)
 	downfall = saturate(downfall * 1.5 - 0.25);
 
 
-	vec3 n = n1 * 2.0;
-	// n += n2 * saturate(downfall * 2.0) * 2.0;
-	// n += n3 * saturate(downfall * 2.0 - 1.0) * 2.0;
-	// n = n3 * 3.0;
-
-	n *= 0.2;
+	vec3 n = n1 * 0.4;
 
 	float lod = dot(abs(fwidth(pos.xyz)), vec3(1.0));
 
 	n.xy *= 1.0 / (1.0 + lod * 5.0);
 
 	n.xy /= wet + 0.1;
-	// n.x = downfall;
 
 	wet = saturate(wet * 1.0 + downfall * (1.0 - wet) * 0.5);
-	// wet = downfall * 0.2 + 0.8;
 
 	n.xy *= rainStrength;
 
 	vec3 rainFlowNormal = vec3(0.0, 0.0, 1.0);
-	// rainFlowNormal.xy = vec2(Get3DNoise(flowPos.xyz) * 2.0 - 1.0, Get3DNoise(flowPos.xyz + 2.0) * 2.0 - 1.0) * 0.05;
-	// flowPos.xz *= 4.0;
-	// rainFlowNormal.xy += vec2(Get3DNoise(flowPos.xyz) * 2.0 - 1.0, Get3DNoise(flowPos.xyz + 2.0) * 2.0 - 1.0) * 0.035;
-	// rainFlowNormal = normalize(rainFlowNormal);
 
 	n = mix(rainFlowNormal, n, saturate(norm.y));
-
-	n = mix(vec3(0, 0, 1), n, clamp(blockLight.y * 1.05 - 0.9, 0.0, 0.1) / 0.1);
+	n = mix(vec3(0, 0, 1), n, clamp(blockLight.y * 1.05 - 0.9, 0.0, 0.1) * 10.0);
 
 	return n;
 }
@@ -434,7 +418,7 @@ void main() {
 	vec3 wavesNormal = GetWavesNormal(worldPosition, 1.0f, tbnMatrix);
 	//vec3 wavesNormal = vec3(0.0f, 0.0f, 1.0f);
 	#ifdef RAIN_SPLASH_EFFECT
-		if (distance < 40.0f) wavesNormal = normalize(wavesNormal + GetRainNormal(worldPosition.xyz, worldNormal + wavesNormal, 1.0) * 1.0 * vec3(1.0, 1.0, 0.0));
+		if (distance < 40.0f) wavesNormal = normalize(wavesNormal + GetRainNormal(worldPosition.xyz, worldNormal + wavesNormal, 1.0) * vec3(1.0, 1.0, 0.0));
 	#endif
 
 	vec3 waterNormal = wavesNormal * tbnMatrix;

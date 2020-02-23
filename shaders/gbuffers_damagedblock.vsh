@@ -59,84 +59,6 @@ uniform vec2 taaJitter;
 
 #define FRAME_TIME frameTimeCounter * ANIMATION_SPEED
 
-vec4 cubic(float x)
-{
-    float x2 = x * x;
-    float x3 = x2 * x;
-    vec4 w;
-    w.x =   -x3 + 3*x2 - 3*x + 1;
-    w.y =  3*x3 - 6*x2       + 4;
-    w.z = -3*x3 + 3*x2 + 3*x + 1;
-    w.w =  x3;
-    return w / 6.f;
-}
-
-vec4 BicubicTexture(in sampler2D tex, in vec2 coord)
-{
-	int resolution = 64;
-
-	coord *= resolution;
-
-	float fx = fract(coord.x);
-    float fy = fract(coord.y);
-    coord.x -= fx;
-    coord.y -= fy;
-
-    vec4 xcubic = cubic(fx);
-    vec4 ycubic = cubic(fy);
-
-    vec4 c = vec4(coord.x - 0.5, coord.x + 1.5, coord.y - 0.5, coord.y + 1.5);
-    vec4 s = vec4(xcubic.x + xcubic.y, xcubic.z + xcubic.w, ycubic.x + ycubic.y, ycubic.z + ycubic.w);
-    vec4 offset = c + vec4(xcubic.y, xcubic.w, ycubic.y, ycubic.w) / s;
-
-    vec4 sample0 = texture2D(tex, vec2(offset.x, offset.z) / resolution);
-    vec4 sample1 = texture2D(tex, vec2(offset.y, offset.z) / resolution);
-    vec4 sample2 = texture2D(tex, vec2(offset.x, offset.w) / resolution);
-    vec4 sample3 = texture2D(tex, vec2(offset.y, offset.w) / resolution);
-
-    float sx = s.x / (s.x + s.y);
-    float sy = s.z / (s.z + s.w);
-
-    return mix( mix(sample3, sample2, sx), mix(sample1, sample0, sx), sy);
-}
-
-
-
-
-// 	vec4 result = mix(texCenter, texRight, vec4(f.x));
-// 	return result;
-// }
-
-
-vec4 TextureSmooth(in sampler2D tex, in vec2 coord)
-{
-	int level = 0;
-	vec2 res = vec2(64.0f);
-	coord = coord * res;
-	vec2 i = floor(coord);
-	vec2 f = fract(coord);
-	f = f * f * (3.0f - 2.0f * f);
-	//f = 1.0f - (cos(f * 3.1415f) * 0.5f + 0.5f);
-
-	//i -= vec2(0.5f);
-
-	vec2 icoordCenter 		= i / res;
-	vec2 icoordRight 		= (i + vec2(1.0f, 0.0f)) / res;
-	vec2 icoordUp	 		= (i + vec2(0.0f, 1.0f)) / res;
-	vec2 icoordUpRight	 	= (i + vec2(1.0f, 1.0f)) / res;
-
-
-	vec4 texCenter 	= texture2DLod(tex, icoordCenter, 	level);
-	vec4 texRight 	= texture2DLod(tex, icoordRight, 	level);
-	vec4 texUp 		= texture2DLod(tex, icoordUp, 		level);
-	vec4 texUpRight	= texture2DLod(tex, icoordUpRight,  level);
-
-	texCenter = mix(texCenter, texUp, vec4(f.y));
-	texRight  = mix(texRight, texUpRight, vec4(f.y));
-
-	vec4 result = mix(texCenter, texRight, vec4(f.x));
-	return result;
-}
 
 float Impulse(in float x, in float k)
 {
@@ -241,20 +163,6 @@ void main() {
 	if   ( mc_Entity.x == 18.0 
 
 		|| mc_Entity.x == 161.0f
-		/*
-		|| mc_Entity.x == 1962.0f //Biomes O Plenty: Leaves
-		|| mc_Entity.x == 1924.0f //Biomes O Plenty: Leaves
-		|| mc_Entity.x == 1923.0f //Biomes O Plenty: Leaves
-		|| mc_Entity.x == 1926.0f //Biomes O Plenty: Leaves
-		|| mc_Entity.x == 1936.0f //Biomes O Plenty: Giant Flower Leaves
-		|| mc_Entity.x == 184.0f  //Yellow autumn leaves
-		|| mc_Entity.x == 185.0f  //Dying leaves
-		|| mc_Entity.x == 186.0f  //maple leaves
-		|| mc_Entity.x == 187.0f  //maple leaves
-		|| mc_Entity.x == 192.0f  //maple leaves
-		|| mc_Entity.x == 249.0f  //Willow leaves
-		|| mc_Entity.x == 248.0f  //Sacred Oak Leaves
-*/
 		 ) 
 	{
 		if (color.r > 0.999 && color.g > 0.999 && color.b > 0.999)
@@ -375,15 +283,15 @@ position.xyz += cameraPosition.xyz;
 		vec3 pn0 = position.xyz;
 			 pn0.x -= FRAME_TIME / 3.0f;
 
-		vec3 stoch = BicubicTexture(noisetex, pn0.xz / 64.0f).xyz;
-		vec3 stochLarge = BicubicTexture(noisetex, position.xz / (64.0f * 6.0f)).xyz;
+		vec3 stoch = texture2D(noisetex, pn0.xz / 64.0f).xyz;
+		vec3 stochLarge = texture2D(noisetex, position.xz / (64.0f * 6.0f)).xyz;
 
 		vec3 pn = position.xyz;
 			 pn.x *= 2.0f;
 			 pn.x -= FRAME_TIME * 15.0f;
 			 pn.z *= 8.0f;
 
-		vec3 stochLargeMoving = BicubicTexture(noisetex, pn.xz / (64.0f * 10.0f)).xyz;
+		vec3 stochLargeMoving = texture2D(noisetex, pn.xz / (64.0f * 10.0f)).xyz;
 
 
 
@@ -537,23 +445,6 @@ position.xyz += cameraPosition.xyz;
 	gl_Position.xy += taaJitter;
 	gl_Position.xyz *= gl_Position.w;
 #endif
-
-	
-
-	// float colorDiff = abs(color.r - color.g);
-	// 	  colorDiff += abs(color.r - color.b);
-	// 	  colorDiff += abs(color.g - color.b);
-
-	// if (colorDiff < 0.001f && mc_Entity.x != -1.0f && mc_Entity.x != 63 && mc_Entity.x != 68 && mc_Entity.x != 323) {
-
-	// 	float lum = color.r + color.g + color.b;
-	// 		  lum /= 3.0f;
-
-	// 	if (lum < 0.92f) {
-	// 		color.rgb = vec3(1.0f);
-	// 	}
-
-	// }	
 	
 	gl_FogFragCoord = gl_Position.z;
 	
@@ -602,7 +493,6 @@ position.xyz += cameraPosition.xyz;
 	texFix = 1.0f;
 	#endif
 
-	//if(distance < 80.0f){	
 		if (gl_Normal.x > 0.5) {
 			//  1.0,  0.0,  0.0
 			tangent  = normalize(gl_NormalMatrix * vec3( 0.0,  0.0,  texFix));
@@ -632,7 +522,6 @@ position.xyz += cameraPosition.xyz;
 			tangent  = normalize(gl_NormalMatrix * vec3( texFix,  0.0,  0.0));
 			binormal = normalize(gl_NormalMatrix * vec3( 0.0, -1.0,  0.0));
 		}
-	//}
 
 	
 	tbnMatrix = mat3(tangent.x, binormal.x, normal.x,

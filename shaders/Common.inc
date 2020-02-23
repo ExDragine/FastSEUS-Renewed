@@ -23,19 +23,14 @@ vec3 DecodeNormal(vec2 enc)
 {
 	vec2 fenc = enc * 4.0 - 2.0;
 	float f = dot(fenc, fenc);
-	float g = sqrt(1.0 - f / 4.0);
+	float g = sqrt(1.0 - f * 0.25);
 	vec3 normal;
 	normal.xy = fenc * g;
-	normal.z = 1.0 - f / 2.0;
+	normal.z = 1.0 - f * 0.5;
 	return normal;
 }
 
 
-
-vec4 SampleLinear(sampler2D tex, vec2 coord)
-{
-	return pow(texture2D(tex, coord), vec4(2.2));
-}
 
 vec3 LinearToGamma(vec3 c)
 {
@@ -61,24 +56,22 @@ vec3 rand(vec2 coord)
 {
 	float dotVec = dot(coord, vec2(12.9898, 78.223));
 
-	float noiseX = saturate(fract(sin(dotVec) * 43758.5453));
-	float noiseY = saturate(fract(sin(dotVec * 2.0) * 43758.5453));
-	float noiseZ = saturate(fract(sin(dotVec * 3.0) * 43758.5453));
+	vec3 noise = vec3(dotVec, dotVec * 2.0, dotVec * 3.0);
+		 noise *= 43758.5453;
 
-	return vec3(noiseX, noiseY, noiseZ);
+	return saturate(fract(noise));
 }
 
+const float PI = 3.14159265359;
+const float N1 = sqrt(4 * PI / 3);
+const float transferl1 = (sqrt(PI) / 3.0) * N1;
+const float transferl0 = PI;
+
+const float sqrt1OverPI = sqrt(1.0 / PI);
+const float sqrt3OverPI = sqrt(3.0 / PI);
 
 vec4 ToSH(float value, vec3 dir)
 {
-	const float PI = 3.14159265359;
-	const float N1 = sqrt(4 * PI / 3);
-	const float transferl1 = (sqrt(PI) / 3.0) * N1;
-	const float transferl0 = PI;
-
-	const float sqrt1OverPI = sqrt(1.0 / PI);
-	const float sqrt3OverPI = sqrt(3.0 / PI);
-
 	vec4 coeffs;
 
 	coeffs = vec4(sqrt1OverPI * transferl0, sqrt3OverPI * dir.yzx * transferl1);
@@ -91,21 +84,13 @@ vec4 ToSH(float value, vec3 dir)
 
 vec3 FromSH(vec4 cR, vec4 cG, vec4 cB, vec3 lightDir)
 {
-	const float PI = 3.14159265;
-
-	const float N1 = sqrt(4 * PI / 3);
-	const float transferl1 = (sqrt(PI) / 3.0) * N1;
-	const float transferl0 = PI;
-
-	const float sqrt1OverPI = sqrt(1.0 / PI);
-	const float sqrt3OverPI = sqrt(3.0 / PI);
-
 	vec4 sh;
 
 	sh = vec4(sqrt1OverPI, sqrt3OverPI * lightDir.yzx) * 0.5f;
 	sh.yw *= -1.0f;
 
 	vec3 result;
+
 	result.r = sh.x * cR.x;
 	result.r += sh.y * cR.y;
 	result.r += sh.z * cR.z;
@@ -130,11 +115,16 @@ vec3 FromSH(vec4 cR, vec4 cG, vec4 cB, vec3 lightDir)
 
 
 
+
+const float R = 1.0;
+#define R_INNER 0.985
+const float SCALE_L = 1.0 / (R - R_INNER);
+
 //x is distance to outer surface, y is distance to inner surface
-vec2 RaySphereIntersection( vec3 p, vec3 dir, float r ) 
+vec2 RaySphereIntersection( vec3 p, vec3 dir ) 
 {
 	float b = dot( p, dir );
-	float c = dot( p, p ) - r * r;
+	float c = dot( p, p ) - R * R;
 	
 	float d = b * b - c;
 	if ( d < 0.0 ) 
@@ -146,9 +136,6 @@ vec2 RaySphereIntersection( vec3 p, vec3 dir, float r )
 	
 	return vec2( -b - d, -b + d );
 }
-
-
-#define R_INNER 0.985
 
 // Mie
 // g : ( -0.75, -0.999 )
@@ -177,9 +164,7 @@ float phase_reyleigh( float cc )
 
 float density( vec3 p )
 {
-	const float R = 1.0;
-	const float SCALE_H = 4.0 / ( R - R_INNER );
-	const float SCALE_L = 1.0 / ( R - R_INNER );
+	const float SCALE_H = SCALE_L * 4.0;
 
 	return exp( -( length( p ) - R_INNER ) * SCALE_H ) * 2.0;
 }
@@ -187,9 +172,6 @@ float density( vec3 p )
 float optic( vec3 p, vec3 q ) 
 {
 	const int numOutscatter = 1;
-
-	const float R = 1.0;
-	const float SCALE_L = 1.0 / (R - R_INNER);
 
 	vec3 step = ( q - p ) / float(numOutscatter);
 	step *= 0.3;
@@ -210,11 +192,6 @@ float optic( vec3 p, vec3 q )
 vec3 in_scatter(vec3 o, vec3 dir, vec2 e, vec3 l, const float mieAmount, const float rayleighAmount) 
 {
 	const float numInscatter = 2;
-	
-	const float PI = 3.14159265359;
-
-	const float R = 1.0;
-	const float SCALE_L = 1.0 / (R - R_INNER);
 
 	float K_R = 0.186/* * rayleighAmount*/;
 	float K_M = 0.035/* * mieAmount*/;
@@ -222,25 +199,20 @@ vec3 in_scatter(vec3 o, vec3 dir, vec2 e, vec3 l, const float mieAmount, const f
 	const vec3 C_R = vec3(0.2, 0.45, 1.0);	//Rayleigh scattering coefficients
 	const float G_M = -0.75;
 
-	float boosty = saturate(l.y + 0.1) * 0.95 + 0.05;
-	boosty = 1.0 / sin(boosty);
-
-	float len = (e.y * (1.0 + boosty * 0.0)) / float(numInscatter);
+	float len = e.y / float(numInscatter);
 	vec3 step = dir * len;
 	step *= 2.0;
 	vec3 p = o;
-
-	//float boosty = 1.0 - abs(l.y);
 	
 
-	vec3 v = p + dir * ( len * (0.5 + boosty * 0.0) );
+	vec3 v = p + dir * ( len * 0.5 );
 
 
 
 	vec3 sum = vec3( 0.0 );
 	for ( int i = 0; i < numInscatter; i++ ) 
 	{
-		vec2 f = RaySphereIntersection( v, l, R );
+		vec2 f = RaySphereIntersection( v, l);
 		vec3 u = v + l * f.y;
 		
 		float n = ( optic( p, v ) + optic( v, u ) ) * ( PI * 4.0 );
@@ -260,11 +232,6 @@ vec3 in_scatter(vec3 o, vec3 dir, vec2 e, vec3 l, const float mieAmount, const f
 vec3 in_scatter2(vec3 o, vec3 dir, vec2 e, vec3 l) 
 {
 	const float numInscatter = 2;
-	
-	const float PI = 3.14159265359;
-
-	const float R = 1.0;
-	const float SCALE_L = 1.0 / (R - R_INNER);
 
 	float K_R = 0.166;
 	float K_M = 0.00;
@@ -277,18 +244,14 @@ vec3 in_scatter2(vec3 o, vec3 dir, vec2 e, vec3 l)
 	step *= 2.0;
 	vec3 p = o;
 
-	//float boosty = 1.0 - abs(l.y);
-	float boosty = saturate(l.y + 0.1) * 0.95 + 0.05;
-	boosty = 1.0 / sin(boosty);
-
-	vec3 v = p + dir * ( len * (0.5 + boosty * 0.0) );
+	vec3 v = p + dir * ( len * 0.5 );
 
 
 
 	vec3 sum = vec3( 0.0 );
 	for ( int i = 0; i < numInscatter; i++ ) 
 	{
-		vec2 f = RaySphereIntersection( v, l, R );
+		vec2 f = RaySphereIntersection( v, l );
 		vec3 u = v + l * f.y;
 		
 		float n = ( optic( p, v ) + optic( v, u ) ) * ( PI * 4.0 );
@@ -307,7 +270,6 @@ vec3 in_scatter2(vec3 o, vec3 dir, vec2 e, vec3 l)
 
 vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount)
 {
-	const float R = 1.0;
 
 	vec3 eye = vec3(0.0, mix(R_INNER, 1.0, 0.05), 0.0);
 
@@ -322,8 +284,8 @@ vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount)
 
 	vec3 up = vec3(0.0, 1.0, 0.0);
 
-	vec2 e = RaySphereIntersection(eye, rayDir, R);
-	vec2 eup = RaySphereIntersection(eye, up, R);
+	vec2 e = RaySphereIntersection(eye, rayDir);
+	vec2 eup = RaySphereIntersection(eye, up);
 
 
 	vec3 atmosphere = in_scatter(eye, rayDir, e, lightVector, mieAmount, 1.0);
@@ -357,7 +319,6 @@ vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount)
 
 vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount, float depth)
 {
-	const float R = 1.0;
 
 	vec3 eye = vec3(0.0, mix(R_INNER, 1.0, 0.05), 0.0);
 
@@ -372,8 +333,8 @@ vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount,
 
 	vec3 up = vec3(0.0, 1.0, 0.0);
 
-	vec2 e = RaySphereIntersection(eye, rayDir, R);
-	vec2 eup = RaySphereIntersection(eye, up, R);
+	vec2 e = RaySphereIntersection(eye, rayDir);
+	vec2 eup = RaySphereIntersection(eye, up);
 	e.y = depth;
 	eup.y = depth;
 
@@ -409,7 +370,6 @@ vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount,
 
 vec3 AtmosphericScatteringSingle(vec3 rayDir, vec3 lightVector, const float mieAmount)
 {
-	const float R = 1.0;
 
 	vec3 eye = vec3(0.0, mix(R_INNER, 1.0, 0.05), 0.0);
 
@@ -424,8 +384,8 @@ vec3 AtmosphericScatteringSingle(vec3 rayDir, vec3 lightVector, const float mieA
 
 	vec3 up = vec3(0.0, 1.0, 0.0);
 
-	vec2 e = RaySphereIntersection(eye, rayDir, R);
-	vec2 eup = RaySphereIntersection(eye, up, R);
+	vec2 e = RaySphereIntersection(eye, rayDir);
+	vec2 eup = RaySphereIntersection(eye, up);
 
 
 	vec3 atmosphere = in_scatter(eye, rayDir, e, lightVector, mieAmount, 0.7);

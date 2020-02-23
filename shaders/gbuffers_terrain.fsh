@@ -389,9 +389,6 @@ float GetModulatedRainSpecular(in vec3 pos)
 
 vec3 GetRainAnimationTex(sampler2D tex, vec2 uv, float wet)
 {
-	//float frame = mod(floor(float(frameCounter) * 1.0), 60.0);
-	// frame = 0.0;
-
 	float frame = mod(floor(frameTimeCounter * 60.0), 60.0);
 	vec2 coord = vec2(uv.x, mod(uv.y / 60.0, 1.0) - frame / 60.0);
 
@@ -399,7 +396,6 @@ vec3 GetRainAnimationTex(sampler2D tex, vec2 uv, float wet)
 	n.y *= -1.0;
 
 	n.xy = pow(abs(n.xy) * 1.0, vec2(2.0 - wet * wet * wet * 1.2)) * sign(n.xy);
-	// n.xy = pow(abs(n.xy) * 1.0, vec2(1.0)) * sign(n.xy);
 
 	return n;
 }
@@ -407,9 +403,9 @@ vec3 GetRainAnimationTex(sampler2D tex, vec2 uv, float wet)
 vec3 BilateralRainTex(sampler2D tex, vec2 uv, float wet)
 {
 	vec3 n = GetRainAnimationTex(tex, uv.xy, wet);
-	vec3 nR = GetRainAnimationTex(tex, uv.xy + vec2(1.0, 0.0) / 128.0, wet);
-	vec3 nU = GetRainAnimationTex(tex, uv.xy + vec2(0.0, 1.0) / 128.0, wet);
-	vec3 nUR = GetRainAnimationTex(tex, uv.xy + vec2(1.0, 1.0) / 128.0, wet);
+	vec3 nR = GetRainAnimationTex(tex, uv.xy + vec2(1.0, 0.0) * 0.0078125, wet);
+	vec3 nU = GetRainAnimationTex(tex, uv.xy + vec2(0.0, 1.0) * 0.0078125, wet);
+	vec3 nUR = GetRainAnimationTex(tex, uv.xy + vec2(1.0, 1.0) * 0.0078125, wet);
 
 	vec2 fractCoord = fract(uv.xy * 128.0);
 
@@ -445,21 +441,14 @@ vec3 GetRainSplashNormal(vec3 worldPosition, vec3 worldNormal, inout float wet)
 	downfall = saturate(downfall * 1.5 - 0.25);
 
 
-	vec3 n = n1 * 1.0;
-	// n += n2 * saturate(downfall * 2.0) * 1.0;
-	// n += n3 * saturate(downfall * 2.0 - 1.0) * 1.0;
-	// n = n3 * 3.0;
+	vec3 n = n1;
 
 
 	float lod = dot(abs(fwidth(pos.xyz)), vec3(1.0));
 
 	n.xy *= 1.0 / (1.0 + lod * 5.0);
 
-	// n.xy /= wet + 0.1;
-	// n.x = downfall;
-
 	wet = saturate(wet * 1.0 + downfall * (1.0 - wet) * 0.95);
-	// wet = downfall * 0.2 + 0.8;
 
 	n.xy *= rainStrength;
 
@@ -471,13 +460,6 @@ vec3 GetRainSplashNormal(vec3 worldPosition, vec3 worldNormal, inout float wet)
 
 
 	vec3 rainFlowNormal = vec3(0.0, 0.0, 1.0);
-	// flowPos.xz *= 12.0;
-	// flowPos.y += frameTimeCounter * 6.0;
-	// rainFlowNormal.xy = vec2(Get3DNoise(flowPos.xyz) * 2.0 - 1.0, Get3DNoise(flowPos.xyz + 2.0) * 2.0 - 1.0) * 0.05;
-	// flowPos.xz *= 4.0;
-	// rainFlowNormal.xy += vec2(Get3DNoise(flowPos.xyz) * 2.0 - 1.0, Get3DNoise(flowPos.xyz + 2.0) * 2.0 - 1.0) * 0.035;
-	// rainFlowNormal = normalize(rainFlowNormal);
-
 	n = mix(rainFlowNormal, rainSplashNormal, saturate(worldNormal.y));
 
 	return n;
@@ -516,10 +498,6 @@ void main()
 	vec4 albedo = textureGrad(texture, textureCoordinate.st, texGradX, texGradY);
 	albedo *= color;
 
-
-	//vec2 lightmap;
-	// lightmap.x = clamp((lmcoord.x * 33.05f / 32.0f) - 1.05f / 32.0f, 0.0f, 1.0f);
-	// lightmap.y = clamp((lmcoord.y * 33.05f / 32.0f) - 1.05f / 32.0f, 0.0f, 1.0f);
 
 
 	// CurveLightmapSky(lightmap.y);
@@ -571,7 +549,7 @@ void main()
 	normalMap = mix(normalMap, vec3(0.0, 0.0, 1.0), vec3(wet * wet));
 
 	#ifdef RAIN_SPLASH_EFFECT
-		if(distance < 40.0f) normalMap = normalize(normalMap + rainNormal * wet * saturate(worldNormal.y) * vec3(1.0, 1.0, 0.0));
+		normalMap = normalize(normalMap + rainNormal * wet * saturate(worldNormal.y) * vec3(1.0, 1.0, 0.0));
 	#endif
 
 	viewNormal = normalize(normalMap) * tbnMatrix;
