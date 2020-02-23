@@ -100,8 +100,8 @@ vec3 BlurV(vec2 coord, const float zoom)
 
 	for (int i = 1; i < 5; i++)
 	{
-		color += GetColor(coord + vec2(0.0, offsets[i] * 1.0) * texel) * weights[i];
-		color += GetColor(coord - vec2(0.0, offsets[i] * 1.0) * texel) * weights[i];
+		color += GetColor(coord + vec2(0.0, offsets[i]) * texel) * weights[i];
+		color += GetColor(coord - vec2(0.0, offsets[i]) * texel) * weights[i];
 	}
 
 	return color;
@@ -232,16 +232,32 @@ void main() {
 	float motionVectorDiff = (abs(motionVectorMagnitude - prevColor.a));
 
 	vec3 avgColor = vec3(0.0,0.0,0.0);
+/*
 	vec3 avgX = vec3(0.0);
 	vec3 avgY = vec3(0.0);
+*/
 
 
-	int c = 0;
+	//int c = 0;
+	int c = 9;
 
 	vec3 m1 = vec3(0.0);
 	vec3 m2 = vec3(0.0);
 
-	///*
+///*
+	vec3 samp = pow(texture2DLod(gaux3, texcoord.st, 2.0).rgb, vec3(COLORPOW));
+	avgColor = samp;
+
+	//TODO: Fix these!
+	//avgX = samp;
+	//avgY = samp;
+
+	samp = RGBToYUV(samp);
+	m1 = samp * c;
+	m2 = samp * m1;
+//*/
+
+/*
 	for (int i = -1; i <= 1; i++)
 	{
 		for (int j = -1; j <= 1; j++)
@@ -271,7 +287,7 @@ void main() {
 
 	avgX /= 3.0;
 	avgY /= 3.0;
-
+*/
 
 #ifdef TAA_AGGRESSIVE
 	float colorWindow = 1.9;
@@ -281,8 +297,8 @@ void main() {
 
 	vec3 mu = m1 / c;
 	vec3 sigma = sqrt(max(vec3(0.0), m2 / c - mu * mu));
-	vec3 minc = mu - (colorWindow) * sigma;
-	vec3 maxc = mu + (colorWindow) * sigma;
+	vec3 minc = mu - colorWindow * sigma;
+	vec3 maxc = mu + colorWindow * sigma;
 
 
 
@@ -298,10 +314,13 @@ void main() {
 
 	//adaptive sharpen
 	vec3 sharpen = (vec3(1.0) - exp(-(color - avgColor) * 15.0)) * 0.06;
+/*
+	//Before fixing avgX and avgY, do not use these!
 	vec3 sharpenX = (vec3(1.0) - exp(-(color - avgX) * 15.0)) * 0.06;
 	vec3 sharpenY = (vec3(1.0) - exp(-(color - avgY) * 15.0)) * 0.06;
 	color += sharpenX * (0.45 / blendWeight) * pixelErrorFactor.x;
 	color += sharpenY * (0.45 / blendWeight) * pixelErrorFactor.y;
+*/
 
 
 
