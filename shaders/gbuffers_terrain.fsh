@@ -523,7 +523,7 @@ void main()
 	float wet = GetModulatedRainSpecular(worldPosition.xyz + cameraPosition.xyz);
 	#ifdef RAIN_SPLASH_EFFECT
 		vec3 rainNormal = vec3(0.0, 0.0, 1.0);
-		if(distance < 40.0f) rainNormal = GetRainSplashNormal(worldPosition.xyz, worldNormal, wet);
+		if(distance < 40.0f) rainNormal = GetRainSplashNormal(worldPosition.xyz + cameraPosition.xyz, worldNormal, wet);
 	#endif
 	wet *= saturate(worldNormal.y * 0.5 + 0.5);
 	wet *= clamp(blockLight.y * 1.05 - 0.9, 0.0, 0.1) / 0.1;

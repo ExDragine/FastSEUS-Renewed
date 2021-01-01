@@ -1,5 +1,7 @@
 #version 120
 
+#extension GL_ARB_gpu_shader5 : enable
+
 /*
  _______ _________ _______  _______  _
 (  ____ \\__   __/(  ___  )(  ____ )( )
@@ -91,25 +93,37 @@ vec3 BlurV(vec2 coord, const float zoom)
 	vec3 color = vec3(0.0);
 
 	vec2 texel = 1.0 / vec2(viewWidth, viewHeight);
-		 //texel /= zoom;
 
 	float weights[5] = float[5](0.27343750, 0.21875000, 0.10937500, 0.03125000, 0.00390625);
 	float offsets[5] = float[5](0.00000000, 1.00000000, 2.00000000, 3.00000000, 4.00000000);
 	
 	color += GetColor(coord) * weights[0];
 
-	for (int i = 1; i < 5; i++)
-	{
-		color += GetColor(coord + vec2(0.0, offsets[i]) * texel) * weights[i];
-		color += GetColor(coord - vec2(0.0, offsets[i]) * texel) * weights[i];
-	}
+	color += GetColor(coord + vec2(0.0, offsets[1] * texel.y)) * weights[1];
+	color += GetColor(coord - vec2(0.0, offsets[1] * texel.y)) * weights[1];
+
+	color += GetColor(coord + vec2(0.0, offsets[2] * texel.y)) * weights[2];
+	color += GetColor(coord - vec2(0.0, offsets[2] * texel.y)) * weights[2];
+
+	color += GetColor(coord + vec2(0.0, offsets[3] * texel.y)) * weights[3];
+	color += GetColor(coord - vec2(0.0, offsets[3] * texel.y)) * weights[3];
+
+	color += GetColor(coord + vec2(0.0, offsets[4] * texel.y)) * weights[4];
+	color += GetColor(coord - vec2(0.0, offsets[4] * texel.y)) * weights[4];
 
 	return color;
 }
 
-float 	ExpToLinearDepth(in float depth)
-{
-	return 2.0f * near * far / (far + near - (2.0f * depth - 1.0f) * (far - near));
+float ExpToLinearDepth(in float depth) {
+	vec2 a = vec2(fma(depth, 2.0, -1.0), 1.0);
+
+	mat2 ipm = mat2(gbufferProjectionInverse[2].z, gbufferProjectionInverse[2].w,
+					gbufferProjectionInverse[3].z, gbufferProjectionInverse[3].w);
+
+	vec2 d = ipm * a;
+		 d.x /= d.y;
+
+	return -d.x;
 }
 
 vec2 GetNearFragment(vec2 coord, float depth, out float minDepth)
@@ -123,39 +137,23 @@ vec2 GetNearFragment(vec2 coord, float depth, out float minDepth)
 	depthSamples.z = texture2D(gdepthtex, coord + texel * vec2(-1.0, 1.0)).x;
 	depthSamples.w = texture2D(gdepthtex, coord + texel * vec2(-1.0, -1.0)).x;
 
-	vec2 targetFragment = vec2(0.0, 0.0);
+	float checker = step(depth, depthSamples.x);
 
-	if (depthSamples.x < depth)
-		targetFragment = vec2(1.0, 1.0);
-	if (depthSamples.y < depth)
-		targetFragment = vec2(1.0, -1.0);
-	if (depthSamples.z < depth)
-		targetFragment = vec2(-1.0, 1.0);
-	if (depthSamples.w < depth)
-		targetFragment = vec2(-1.0, -1.0);
+	vec2 targetFragment = vec2(1.0 - checker);
 
+	checker = step(depth, depthSamples.y);
+	targetFragment = (1.0 - checker) * vec2(1.0, -1.0) + checker * targetFragment;
+
+	checker = step(depth, depthSamples.z);
+	targetFragment = (1.0 - checker) * vec2(-1.0, 1.0) + checker * targetFragment;
+
+	checker = step(depth, depthSamples.w);
+	targetFragment = (1.0 - checker) * vec2(-1.0, -1.0) + checker * targetFragment;
+		
 
 	minDepth = min(min(min(depthSamples.x, depthSamples.y), depthSamples.z), depthSamples.w);
 
 	return coord + texel * targetFragment;
-}
-
-vec3 RGBToYUV(vec3 color)
-{
-	mat3 mat = 		mat3( 0.2126,  0.7152,  0.0722,
-				 	-0.09991, -0.33609,  0.436,
-				 	 0.615, -0.55861, -0.05639);
-				 	
-	return color * mat;
-}
-
-vec3 YUVToRGB(vec3 color)
-{
-	mat3 mat = 		mat3(1.000,  0.000,  1.28033,
-				 	1.000, -0.21482, -0.38059,
-				 	1.000,  2.12798,  0.000);
-				 	
-	return color * mat;
 }
 
 #define COLORPOW 1.0
@@ -165,10 +163,9 @@ vec3 YUVToRGB(vec3 color)
 void main() {
 
 	float zoom = 1.0f / BLOOM_RESOLUTION_REDUCTION;
-	if (zoom < 0.0f || zoom > 1.0f)
-	{
-		zoom = 1.0f;
-	}
+	float ava = 2.0 - step(0.0, zoom) - step(zoom, 1.0);
+	zoom = ava + (1 - ava) * zoom;
+
 	vec2 bloomCoord = texcoord.st / sqrt(zoom);
 	vec3 bloomColor = vec3(0.0);
 
@@ -221,7 +218,7 @@ void main() {
 
 	vec2 reprojCoord = texcoord.st - motionVector.xy * 0.5;
 
-	vec2 pixelError = cos((fract(abs(texcoord.st - reprojCoord.xy) * vec2(viewWidth, viewHeight)) * 2.0 - 1.0) * 3.14159) * 0.5 + 0.5;
+	vec2 pixelError = cos((fract(abs(texcoord.st - reprojCoord.xy) * vec2(viewWidth, viewHeight)) * 2.0 - 1.0) * PI) * 0.5 + 0.5;
 	vec2 pixelErrorFactor = pow(pixelError, vec2(0.5));
 
 
@@ -231,63 +228,63 @@ void main() {
 
 	float motionVectorDiff = (abs(motionVectorMagnitude - prevColor.a));
 
-	vec3 avgColor = vec3(0.0,0.0,0.0);
-/*
+	vec3 avgColor = vec3(0.0);
 	vec3 avgX = vec3(0.0);
 	vec3 avgY = vec3(0.0);
-*/
 
-
-	//int c = 0;
-	int c = 9;
-
-	vec3 m1 = vec3(0.0);
 	vec3 m2 = vec3(0.0);
 
-///*
-	vec3 samp = pow(texture2DLod(gaux3, texcoord.st, 2.0).rgb, vec3(COLORPOW));
-	avgColor = samp;
 
-	//TODO: Fix these!
-	//avgX = samp;
-	//avgY = samp;
-
-	samp = RGBToYUV(samp);
-	m1 = samp * c;
-	m2 = samp * m1;
-//*/
-
-/*
-	for (int i = -1; i <= 1; i++)
 	{
-		for (int j = -1; j <= 1; j++)
-		{
-			vec2 offs = (vec2(float(i), float(j)) / vec2(viewWidth, viewHeight)) * 1.0;
-			vec3 samp = pow(texture2D(gaux3, texcoord.xy + offs).rgb, vec3(COLORPOW));
-			avgColor += samp;
+		vec2 texel = 1.0 / vec2(viewWidth, viewHeight);
 
-			if (j == 0)
-			{
-				avgX += samp;
-			}
+		//Centre
+		vec3 samp = texture2D(gaux3, texcoord.xy).rgb;
+		avgColor -= samp;
+		avgX += samp;
+		avgY += samp;
+		m2 += samp * samp;
 
-			if (i == 0)
-			{
-				avgY += samp;
-			}
+		//Top
+		samp = texture2D(gaux3, texcoord.xy + vec2(-1.0, 1.0) * texel).rgb;
+		avgColor += samp;
+		m2 += samp * samp;
 
-			samp = RGBToYUV(samp);
+		samp = texture2D(gaux3, texcoord.xy + vec2(0.0, 1.0) * texel).rgb;
+		avgY += samp;
+		m2 += samp * samp;
 
-			m1 += samp;
-			m2 += samp * samp;
-			c++;
-		}
+		samp = texture2D(gaux3, texcoord.xy + vec2(1.0, 1.0) * texel).rgb;
+		avgColor += samp;
+		m2 += samp * samp;
+
+		//Middle
+		samp = texture2D(gaux3, texcoord.xy + vec2(-1.0, 0.0) * texel).rgb;
+		avgX += samp;
+		m2 += samp * samp;
+
+		samp = texture2D(gaux3, texcoord.xy + vec2(1.0, 0.0) * texel).rgb;
+		avgX += samp;
+		m2 += samp * samp;
+
+		//Buttom
+		samp = texture2D(gaux3, texcoord.xy + vec2(-1.0, -1.0) * texel).rgb;
+		avgColor += samp;
+		m2 += samp * samp;
+
+		samp = texture2D(gaux3, texcoord.xy + vec2(0.0, -1.0) * texel).rgb;
+		avgY += samp;
+		m2 += samp * samp;
+
+		samp = texture2D(gaux3, texcoord.xy + vec2(1.0, -1.0) * texel).rgb;
+		avgColor += samp;
+		m2 += samp * samp;
 	}
-	avgColor /= c;
 
+
+	avgColor = (avgColor + avgX + avgY) / 9.0;
 	avgX /= 3.0;
 	avgY /= 3.0;
-*/
 
 #ifdef TAA_AGGRESSIVE
 	float colorWindow = 1.9;
@@ -295,15 +292,10 @@ void main() {
 	float colorWindow = 1.5;
 #endif
 
-	vec3 mu = m1 / c;
-	vec3 sigma = sqrt(max(vec3(0.0), m2 / c - mu * mu));
-	vec3 minc = mu - colorWindow * sigma;
-	vec3 maxc = mu + colorWindow * sigma;
-
-
-
-	//adaptive blur
-	//color = mix(color, avgColor, vec3(0.25 - pixelErrorFactor * 0.25));
+	vec3 sigma = sqrt(max(vec3(0.0), m2 / 9.0 - avgColor * avgColor));
+		 sigma *= colorWindow;
+	vec3 minc = avgColor - sigma;
+	vec3 maxc = avgColor + sigma;
 
 #ifdef TAA_AGGRESSIVE
 	vec3 blendWeight = vec3(0.015);
@@ -314,13 +306,10 @@ void main() {
 
 	//adaptive sharpen
 	vec3 sharpen = (vec3(1.0) - exp(-(color - avgColor) * 15.0)) * 0.06;
-/*
-	//Before fixing avgX and avgY, do not use these!
 	vec3 sharpenX = (vec3(1.0) - exp(-(color - avgX) * 15.0)) * 0.06;
 	vec3 sharpenY = (vec3(1.0) - exp(-(color - avgY) * 15.0)) * 0.06;
 	color += sharpenX * (0.45 / blendWeight) * pixelErrorFactor.x;
 	color += sharpenY * (0.45 / blendWeight) * pixelErrorFactor.y;
-*/
 
 
 
@@ -329,16 +318,7 @@ void main() {
 
 
 	color = mix(color, avgColor, vec3(TAA_SOFTNESS));
-
-	prevColor.rgb = YUVToRGB(clamp(RGBToYUV(prevColor.rgb), minc, maxc));
-
-
-
-
-
-	//blendWeight = mix(blendWeight, 1.0, clamp(motionVectorDiff * 40.0, 0.0, 1.0));
-
-	blendWeight = saturate(blendWeight);
+	prevColor.rgb = clamp(prevColor.rgb, minc, maxc);
 
 	if (depth < 0.7)
 	{
@@ -349,9 +329,6 @@ void main() {
 
 
 	vec3 taa = mix(prevColor.rgb, color, blendWeight);
-
-
-	taa = pow(taa, vec3(1.0 / COLORPOW));
 
 	#else 
 

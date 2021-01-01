@@ -3,7 +3,7 @@
 #define SHADOW_MAP_BIAS 0.90
 
 #define TAA_ENABLED // Temporal Anti-Aliasing. Utilizes multiple rendered frames to reconstruct an anti-aliased image similar to supersampling. Can cause some artifacts.
-#define SHADOW_TAA
+//#define SHADOW_TAA
 
 varying vec4 texcoord;
 varying vec4 vPosition;
@@ -193,9 +193,11 @@ void main() {
 
 	//Temporal jitter
 #ifdef TAA_ENABLED
+#ifdef SHADOW_TAA
 	gl_Position.xyz /= gl_Position.w;
 	gl_Position.xy += taaJitter;
 	gl_Position.xyz *= gl_Position.w;
+#endif
 #endif
 
 	float dist = length(gl_Position.xy);

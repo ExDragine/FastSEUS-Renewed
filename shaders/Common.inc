@@ -67,8 +67,8 @@ const float N1 = sqrt(4 * PI / 3);
 const float transferl1 = (sqrt(PI) / 3.0) * N1;
 const float transferl0 = PI;
 
-const float sqrt1OverPI = sqrt(1.0 / PI);
-const float sqrt3OverPI = sqrt(3.0 / PI);
+const float sqrt1OverPI = inversesqrt(PI);
+const float sqrt3OverPI = inversesqrt(PI / 3.0);
 
 vec4 ToSH(float value, vec3 dir)
 {
@@ -76,7 +76,7 @@ vec4 ToSH(float value, vec3 dir)
 
 	coeffs = vec4(sqrt1OverPI * transferl0, sqrt3OverPI * dir.yzx * transferl1);
 	coeffs *= 0.5f * value;
-	coeffs.yw *= -1.0f;
+	coeffs.yw = -coeffs.yw;
 
 	return coeffs;
 }
@@ -87,7 +87,7 @@ vec3 FromSH(vec4 cR, vec4 cG, vec4 cB, vec3 lightDir)
 	vec4 sh;
 
 	sh = vec4(sqrt1OverPI, sqrt3OverPI * lightDir.yzx) * 0.5f;
-	sh.yw *= -1.0f;
+	sh.yw = -sh.yw;
 
 	vec3 result;
 
@@ -115,26 +115,30 @@ vec3 FromSH(vec4 cR, vec4 cG, vec4 cB, vec3 lightDir)
 
 
 
-
+const float E = 14.3;
 const float R = 1.0;
 #define R_INNER 0.985
 const float SCALE_L = 1.0 / (R - R_INNER);
 
+vec3 eye = vec3(0.0, mix(R_INNER, 1.0, 0.05), 0.0);
+
+
+
 //x is distance to outer surface, y is distance to inner surface
 vec2 RaySphereIntersection( vec3 p, vec3 dir ) 
 {
-	float b = dot( p, dir );
-	float c = dot( p, p ) - R * R;
+	float b = dot(p, dir);
+	float c = dot(p, p) - R * R;
 	
 	float d = b * b - c;
-	if ( d < 0.0 ) 
+	if (d < 0.0) 
 	{
-		return vec2( 10000.0, -10000.0 );
+		return vec2(10000.0, -10000.0);
 	}
 
-	d = sqrt( d );
+	d = sqrt(d);
 	
-	return vec2( -b - d, -b + d );
+	return vec2(-b - d, -b + d);
 }
 
 // Mie
@@ -142,13 +146,13 @@ vec2 RaySphereIntersection( vec3 p, vec3 dir )
 //      3 * ( 1 - g^2 )               1 + c^2
 // F = ----------------- * -------------------------------
 //      2 * ( 2 + g^2 )     ( 1 + g^2 - 2 * g * c )^(3/2)
-float phase_mie( float g, float c, float cc ) {
+float phase_mie(float g, float c, float cc) {
 	float gg = g * g;
 	
-	float a = ( 1.0 - gg ) * ( 1.0 + cc );
+	float a = (1.0 - gg) * (1.0 + cc);
 
 	float b = 1.0 + gg - 2.0 * g * c;
-	b *= sqrt( b );
+	b *= sqrt(b);
 	b *= 2.0 + gg;	
 	
 	return 1.5 * a / b;
@@ -157,130 +161,100 @@ float phase_mie( float g, float c, float cc ) {
 // Reyleigh
 // g : 0
 // F = 3/4 * ( 1 + c^2 )
-float phase_reyleigh( float cc ) 
+float phase_reyleigh(float cc) 
 {
-	return 0.75 * ( 1.0 + cc );
+	return 0.75 * (1.0 + cc);
 }
 
-float density( vec3 p )
+float density(vec3 p)
 {
 	const float SCALE_H = SCALE_L * 4.0;
 
-	return exp( -( length( p ) - R_INNER ) * SCALE_H ) * 2.0;
+	return exp((R_INNER - length(p)) * SCALE_H) * 2.0;
 }
 
 float optic( vec3 p, vec3 q ) 
 {
-	const int numOutscatter = 1;
-
-	vec3 step = ( q - p ) / float(numOutscatter);
-	step *= 0.3;
+	vec3 step = (q - p) * 0.3;
 	vec3 v = p + step * 0.5;
 	
-	float sum = 0.0;
-	for ( int i = 0; i < numOutscatter; i++ ) 
-	{
-		sum += density( v );
-		v += step;
-	}
-	sum *= length( step ) * SCALE_L;
-
+	float sum = density(v);
+		  sum *= length(step) * SCALE_L;
 
 	return sum;
 }
 
 vec3 in_scatter(vec3 o, vec3 dir, vec2 e, vec3 l, const float mieAmount, const float rayleighAmount) 
 {
-	const float numInscatter = 2;
+	const float numInscatter = 3;
 
 	float K_R = 0.186/* * rayleighAmount*/;
 	float K_M = 0.035/* * mieAmount*/;
-	const float E = 14.3;
 	const vec3 C_R = vec3(0.2, 0.45, 1.0);	//Rayleigh scattering coefficients
 	const float G_M = -0.75;
 
 	float len = e.y / float(numInscatter);
 	vec3 step = dir * len;
-	step *= 2.0;
+		 step *= 2.0;
 	vec3 p = o;
 	
 
-	vec3 v = p + dir * ( len * 0.5 );
+	vec3 v = p + dir * (len * 0.5);
 
 
 
-	vec3 sum = vec3( 0.0 );
-	for ( int i = 0; i < numInscatter; i++ ) 
+	vec3 sum = vec3(0.0);
+	for (int i = 0; i < numInscatter; i++) 
 	{
-		vec2 f = RaySphereIntersection( v, l);
+		vec2 f = RaySphereIntersection(v, l);
 		vec3 u = v + l * f.y;
 		
-		float n = ( optic( p, v ) + optic( v, u ) ) * ( PI * 4.0 );
+		float n = (optic(p, v) + optic(v, u)) * (PI * 4.0);
 		
-		sum += density( v ) * exp( -n * ( K_R * C_R + K_M ) );
+		sum += density(v) * exp(-n * (K_R * C_R + K_M));
 
 		v += step;
 	}
 	sum *= len * SCALE_L;
 	
-	float c  = dot( dir, -l );
+	float c  = dot(dir, -l);
 	float cc = c * c;
 	
-	return sum * ( K_R * C_R * phase_reyleigh( cc ) + K_M * phase_mie( G_M, c, cc ) ) * E;
+	return sum * (K_R * C_R * phase_reyleigh(cc) + K_M * phase_mie(G_M, c, cc)) * E;
 }
 
 vec3 in_scatter2(vec3 o, vec3 dir, vec2 e, vec3 l) 
 {
-	const float numInscatter = 2;
-
 	float K_R = 0.166;
 	float K_M = 0.00;
-	const float E = 14.3;
 	const vec3 C_R = vec3(0.2, 0.6, 1.0);	//Rayleigh scattering coefficients
 	const float G_M = -0.65;
 
-	float len = (e.y) / float(numInscatter);
-	vec3 step = dir * len;
-	step *= 2.0;
+	float len = e.y;
 	vec3 p = o;
 
-	vec3 v = p + dir * ( len * 0.5 );
+	vec3 v = p + dir * (len * 0.5);
 
 
 
-	vec3 sum = vec3( 0.0 );
-	for ( int i = 0; i < numInscatter; i++ ) 
-	{
-		vec2 f = RaySphereIntersection( v, l );
-		vec3 u = v + l * f.y;
-		
-		float n = ( optic( p, v ) + optic( v, u ) ) * ( PI * 4.0 );
-		
-		sum += density( v ) * exp( -n * ( K_R * C_R + K_M ) );
+	vec2 f = RaySphereIntersection(v, l);
+	vec3 u = v + l * f.y;	
 
-		v += step;
-	}
-	sum *= len * SCALE_L;
+	float n = (optic(p, v) + optic(v, u)) * (PI * 4.0);
+
+	vec3 sum = density(v) * exp(-n * (K_R * C_R + K_M));
+		 sum *= len * SCALE_L;
 	
-	float c  = dot( dir, -l );
+	float c  = dot(dir, -l);
 	float cc = c * c;
 	
-	return sum * ( K_R * C_R * phase_reyleigh( cc ) + K_M * phase_mie( G_M, c, cc ) ) * E;
+	return sum * (K_R * C_R * phase_reyleigh(cc) + K_M * phase_mie(G_M, c, cc)) * E;
 }
 
 vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount)
 {
-
-	vec3 eye = vec3(0.0, mix(R_INNER, 1.0, 0.05), 0.0);
-
-	vec3 originalRayDir = rayDir;
-
-	if (rayDir.y < 0.0)
-	{
-		//rayDir.y = abs(rayDir.y);
-		//rayDir.y *= rayDir.y;
-		rayDir.y = 0.0;
-	}
+	float ava = step(0.0, rayDir.y);
+	rayDir.y *= ava;
 
 	vec3 up = vec3(0.0, 1.0, 0.0);
 
@@ -294,42 +268,25 @@ vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount)
 
 	vec3 ambient = vec3(0.3, 0.5, 1.0);
 
-	vec3 ground = vec3(0.1, 0.1, 0.1) * 0.05;
+	vec3 ground = vec3(0.005);
 
 	float boosty = saturate(lightVector.y) * 0.90 + 0.10;
 	boosty = 1.0 / sin(boosty);
 
-	//atmosphere += dot(secondary, vec3(0.06)) * ambient * boosty;
 	atmosphere += dot(secondary, vec3(0.66)) * ambient;
-	//atmosphere += ambient * 0.01;
 
 	atmosphere *= vec3(0.8, 0.89, 1.0);
 
 
 	atmosphere = pow(atmosphere, vec3(1.2));
 
-	//if (originalRayDir.y < 0.0)
-	//{
-		//atmosphere *= curve(saturate(originalRayDir.y + 1.0));
-	//}
-
-
 	return atmosphere;
 }
 
 vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount, float depth)
 {
-
-	vec3 eye = vec3(0.0, mix(R_INNER, 1.0, 0.05), 0.0);
-
-	vec3 originalRayDir = rayDir;
-
-	if (rayDir.y < 0.0)
-	{
-		//rayDir.y = abs(rayDir.y);
-		//rayDir.y *= rayDir.y;
-		rayDir.y = 0.0;
-	}
+	float ava = step(0.0, rayDir.y);
+	rayDir.y *= ava;
 
 	vec3 up = vec3(0.0, 1.0, 0.0);
 
@@ -345,42 +302,25 @@ vec3 AtmosphericScattering(vec3 rayDir, vec3 lightVector, const float mieAmount,
 
 	vec3 ambient = vec3(0.3, 0.5, 1.0);
 
-	vec3 ground = vec3(0.1, 0.1, 0.1) * 0.05;
+	vec3 ground = vec3(0.05);
 
 	float boosty = saturate(lightVector.y) * 0.90 + 0.10;
 	boosty = 1.0 / sin(boosty);
 
-	//atmosphere += dot(secondary, vec3(0.06)) * ambient * boosty;
 	atmosphere += dot(secondary, vec3(0.86)) * ambient;
-	//atmosphere += ambient * 0.01;
 
 	atmosphere *= vec3(0.8, 0.89, 1.0);
 
 
 	atmosphere = pow(atmosphere, vec3(1.2));
 
-	//if (originalRayDir.y < 0.0)
-	//{
-		//atmosphere *= curve(saturate(originalRayDir.y + 1.0));
-	//}
-
-
 	return atmosphere;
 }
 
 vec3 AtmosphericScatteringSingle(vec3 rayDir, vec3 lightVector, const float mieAmount)
 {
-
-	vec3 eye = vec3(0.0, mix(R_INNER, 1.0, 0.05), 0.0);
-
-	vec3 originalRayDir = rayDir;
-
-	if (rayDir.y < 0.0)
-	{
-		//rayDir.y = abs(rayDir.y);
-		//rayDir.y *= rayDir.y;
-		rayDir.y = 0.0;
-	}
+	float ava = step(0.0, rayDir.y);
+	rayDir.y *= ava;
 
 	vec3 up = vec3(0.0, 1.0, 0.0);
 
@@ -392,11 +332,6 @@ vec3 AtmosphericScatteringSingle(vec3 rayDir, vec3 lightVector, const float mieA
 
 
 	atmosphere = pow(atmosphere, vec3(1.2));
-
-	//if (originalRayDir.y < 0.0)
-	//{
-		//atmosphere *= curve(saturate(originalRayDir.y + 1.0));
-	//}
 
 
 	return atmosphere;

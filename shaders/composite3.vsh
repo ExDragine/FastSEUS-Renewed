@@ -156,16 +156,16 @@ void main()
 	colorSkylight = vec3(0.0);
 
 ///*
-	const int latSamples = 2;
+	const int latSamples = 1;
 	const int lonSamples = 2;
 
 	for (int i = 0; i < latSamples; i++)
 	{
-		float latitude = (float(i) / float(latSamples)) * 3.14159265;
+		float latitude = (float(i) / float(latSamples)) * PI;
 			  latitude = latitude;
 		for (int j = 0; j < lonSamples; j++)
 		{
-			float longitude = (float(j) / float(lonSamples)) * 3.14159265 * 2.0;
+			float longitude = (float(j) / float(lonSamples)) * PI * 2.0;
 			//longitude = longitude * 0.5 + 0.5;
 
 			vec3 kernel;

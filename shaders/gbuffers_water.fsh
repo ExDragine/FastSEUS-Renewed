@@ -99,8 +99,6 @@ vec4 textureSmooth(in sampler2D tex, in vec2 coord)
 
 	part.x = part.x * part.x * (3.0f - 2.0f * part.x);
 	part.y = part.y * part.y * (3.0f - 2.0f * part.y);
-	// part.x = 1.0f - (cos(part.x * 3.1415f) * 0.5f + 0.5f);
-	// part.y = 1.0f - (cos(part.y * 3.1415f) * 0.5f + 0.5f);
 
 	coord = whole + part;
 

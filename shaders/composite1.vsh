@@ -82,7 +82,6 @@ void ContextualFog(inout vec3 color, in vec3 viewPos, in vec3 viewDir, in vec3 l
 	float fogDensity = density * 0.019;
 		  fogDensity *= 1.0 -  saturate(viewDir.y * 0.5 + 0.5) * 0.72;
 	float fogFactor = pow(1.0 - exp(-dist * fogDensity), 2.0);
-		  //fogFactor = 1.0 -  saturate(viewDir.y * 0.5 + 0.5);
 
 
 
@@ -126,8 +125,11 @@ void main()
 	float zoomEnv = 1.0f / ENV_RESOLUTION_REDUCTION;
 	float zoomSky = 1.0f / SKY_RESOLUTION_REDUCTION;
 
-	zoomEnv = (zoomEnv < 0.0f || zoomEnv > 1.0f) ? 1.0f : zoomEnv;
-	zoomSky = (zoomSky < 0.0f || zoomSky > 1.0f) ? 1.0f : zoomSky;
+	float avaEnv = 2.0 - step(0.0, zoomEnv) - step(zoomEnv, 1.0);
+	float avaSky = 2.0 - step(0.0, zoomSky) - step(zoomSky, 1.0);
+
+	zoomEnv = avaEnv + (1 - avaEnv) * zoomEnv;
+	zoomSky = avaSky + (1 - avaSky) * zoomSky;
 	
 	envCoord = texcoord.st / sqrt(zoomEnv);
 	skyCoord = texcoord.st / sqrt(zoomSky);
@@ -223,7 +225,7 @@ void main()
 
 ///*
 	const int latSamples = 2;
-	const int lonSamples = 2;
+	const int lonSamples = 5;
 
 	vec4 shR = vec4(0.0);
 	vec4 shG = vec4(0.0);
@@ -231,11 +233,11 @@ void main()
 
 	for (int i = 0; i < latSamples; i++)
 	{
-		float latitude = (float(i) / float(latSamples)) * 3.14159265;
+		float latitude = (float(i) / float(latSamples)) * PI;
 			  latitude = latitude;
 		for (int j = 0; j < lonSamples; j++)
 		{
-			float longitude = (float(j) / float(lonSamples)) * 3.14159265 * 2.0;
+			float longitude = (float(j) / float(lonSamples)) * PI * 2.0;
 			//longitude = longitude * 0.5 + 0.5;
 
 			vec3 kernel;
@@ -282,11 +284,6 @@ void main()
 	shG /= latSamples * lonSamples;
 	shB /= latSamples * lonSamples;
 
-	//float ambientMie = 0.01;
-	//shR += ToSH(colorSunlight.r * ambientMie, worldSunVector);
-	//shG += ToSH(colorSunlight.g * ambientMie, worldSunVector);
-	//shB += ToSH(colorSunlight.b * ambientMie, worldSunVector);
-
 	skySHR = shR;
 	skySHG = shG;
 	skySHB = shB;
@@ -303,14 +300,14 @@ void main()
 
 	if (TORCHLIGHT_COLOR_TEMPERATURE == 2000)
 		//2000k
-		colorTorchlight = pow(vec3(255, 141, 11) / 255.0, vec3(2.2));
+		colorTorchlight = GammaToLinear(vec3(255, 141, 11) / 255.0);
 	else if (TORCHLIGHT_COLOR_TEMPERATURE == 2300)
 		//2300k
-		colorTorchlight = pow(vec3(255, 152, 54) / 255.0, vec3(2.2));
+		colorTorchlight = GammaToLinear(vec3(255, 152, 54) / 255.0);
 	else if (TORCHLIGHT_COLOR_TEMPERATURE == 2500)
 		//2500k
-		colorTorchlight = pow(vec3(255, 166, 69) / 255.0, vec3(2.2));
+		colorTorchlight = GammaToLinear(vec3(255, 166, 69) / 255.0);
 	else
 		//3000k
-		colorTorchlight = pow(vec3(255, 180, 107) / 255.0, vec3(2.2));
+		colorTorchlight = GammaToLinear(vec3(255, 180, 107) / 255.0);
 }

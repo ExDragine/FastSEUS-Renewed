@@ -100,8 +100,6 @@ vec3 GrabBlurH(vec2 coord, const float zoom, const float octave, const vec2 offs
 		return vec3(0.0);
 	}
 
-	//vec3 color = GetColor(coord);
-
 	vec3 color = vec3(0.0);
 
 	float weights[5] = float[5](0.27343750, 0.21875000, 0.10937500, 0.03125000, 0.00390625);
@@ -109,11 +107,17 @@ vec3 GrabBlurH(vec2 coord, const float zoom, const float octave, const vec2 offs
 
 	color += GetColor(saturate(coord)) * weights[0];
 
-	for (int i = 1; i < 5; i++)
-	{
-		color += GetColor(saturate(coord + vec2(offsets[i] * 1.0, 0.0) * texel)) * weights[i];
-		color += GetColor(saturate(coord - vec2(offsets[i] * 1.0, 0.0) * texel)) * weights[i];
-	}
+	color += GetColor(saturate(coord + vec2(offsets[1] * texel.x, 0.0))) * weights[1];
+	color += GetColor(saturate(coord - vec2(offsets[1] * texel.x, 0.0))) * weights[1];
+
+	color += GetColor(saturate(coord + vec2(offsets[2] * texel.x, 0.0))) * weights[2];
+	color += GetColor(saturate(coord - vec2(offsets[2] * texel.x, 0.0))) * weights[2];
+
+	color += GetColor(saturate(coord + vec2(offsets[3] * texel.x, 0.0))) * weights[3];
+	color += GetColor(saturate(coord - vec2(offsets[3] * texel.x, 0.0))) * weights[3];
+
+	color += GetColor(saturate(coord + vec2(offsets[4] * texel.x, 0.0))) * weights[4];
+	color += GetColor(saturate(coord - vec2(offsets[4] * texel.x, 0.0))) * weights[4];
 
 	return color;
 }
@@ -139,10 +143,8 @@ void main() {
 	vec3 color = vec3(0.0);
 
 	float zoom = 1.0f / BLOOM_RESOLUTION_REDUCTION;
-	if (zoom < 0.0f || zoom > 1.0f)
-	{
-		zoom = 1.0f;
-	}
+	float ava = 2.0 - step(0.0, zoom) - step(zoom, 1.0);
+	zoom = ava + (1 - ava) * zoom;
 
 	vec2 jitteredCoord = texcoord.st;
 	//jitteredCoord += taaJitter * 0.5f;
@@ -156,10 +158,14 @@ void main() {
 		zoom = sqrt(zoom);
 
 		color += GrabBlurH(bloomCoord.st, zoom, 1.0, vec2(0.0, 0.0));
-		for (float i = 1.0f; i <= 8.0; i++)
-		{
-			color += GrabBlurH(bloomCoord.st, zoom, i + 1.0f, CalcOffset(i, zoom));
-		}
+		color += GrabBlurH(bloomCoord.st, zoom, 2.0, CalcOffset(1, zoom));
+		color += GrabBlurH(bloomCoord.st, zoom, 3.0, CalcOffset(2, zoom));
+		color += GrabBlurH(bloomCoord.st, zoom, 4.0, CalcOffset(3, zoom));
+		color += GrabBlurH(bloomCoord.st, zoom, 5.0, CalcOffset(4, zoom));
+		color += GrabBlurH(bloomCoord.st, zoom, 6.0, CalcOffset(5, zoom));
+		color += GrabBlurH(bloomCoord.st, zoom, 7.0, CalcOffset(6, zoom));
+		color += GrabBlurH(bloomCoord.st, zoom, 8.0, CalcOffset(7, zoom));
+		color += GrabBlurH(bloomCoord.st, zoom, 9.0, CalcOffset(8, zoom));
 	}
 
 

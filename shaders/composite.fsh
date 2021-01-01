@@ -24,7 +24,7 @@ Do not modify this code until you have read the LICENSE.txt contained in the roo
 /////////ADJUSTABLE VARIABLES//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #define TAA_ENABLED // Temporal Anti-Aliasing. Utilizes multiple rendered frames to reconstruct an anti-aliased image similar to supersampling. Can cause some artifacts.
-#define SHADOW_TAA
+//#define SHADOW_TAA
 
 #define ENABLE_SSAO	// Screen space ambient occlusion.
 #define GI	// Indirect lighting from sunlight.
@@ -200,10 +200,8 @@ vec3 ProjectBack(vec3 cameraSpace)
 
 float GetAO(vec2 coord, vec3 normal, float dither)
 {
-	const int numRays = 2;
-
 	const float phi = 1.618033988;
-	const float gAngle = phi * 3.14159265 * 1.0003;
+	const float gAngle = phi * PI * 1.0003;
 
 	float depth = GetDepth(coord);
 	float linDepth = ExpToLinearDepth(depth);
@@ -217,51 +215,51 @@ float GetAO(vec2 coord, vec3 normal, float dither)
 		  zThickness = mix(zThickness, 1.0, 0.5);
 
 	float aoMul = 1.0;
-	
-	for (int i = 0; i < numRays; i++)
-	{
-		float fi = float(i) + dither;
-		float fiN = fi / float(numRays);
-		float lon = gAngle * fi * 6.0;
-		float lat = asin(fiN * 2.0 - 1.0) * 1.0;
 
-		vec3 kernel;
-		kernel.x = cos(lat) * cos(lon);
-		kernel.z = cos(lat) * sin(lon);
-		kernel.y = sin(lat);
+			float fi = dither;
+			float fiN = fi * 0.5;
+			float lon = gAngle * fi * 6.0;
+			float lat = asin(fiN * 2.0 - 1.0) * 1.0;
 
-		kernel.xyz = normalize(kernel.xyz + normal.xyz);
+			vec3 kernel;
+			kernel.x = cos(lat) * cos(lon);
+			kernel.z = cos(lat) * sin(lon);
+			kernel.y = sin(lat);
+			kernel.xyz = normalize(kernel.xyz + normal.xyz);
 
-		float sampleLength = radius * mod(fiN, 0.07) / 0.07;
+			float sampleLength = radius * mod(fiN, 0.07) / 0.07;
+			vec3 samplePos = origin + kernel * sampleLength;
+			vec3 samplePosProj = ProjectBack(samplePos);
 
-		vec3 samplePos = origin + kernel * sampleLength;
+			vec3 actualSamplePos = GetScreenSpacePosition(samplePosProj.xy, GetDepth(samplePosProj.xy)).xyz;
+			vec3 sampleVector = normalize(samplePos - origin);
+			float depthDiff = actualSamplePos.z - samplePos.z;
 
-		vec3 samplePosProj = ProjectBack(samplePos);
+			aoAccum += saturate(dot(sampleVector, normal)) * (1.0 - step(depthDiff, 0.0)) * (1.0 - (zThickness, depthDiff));
 
-		vec3 actualSamplePos = GetScreenSpacePosition(samplePosProj.xy, GetDepth(samplePosProj.xy)).xyz;
+			fi += 1.0;
+			fiN = fi * 0.5;
+			lon = gAngle * fi * 6.0;
+			lat = asin(fiN * 2.0 - 1.0) * 1.0;
 
-		vec3 sampleVector = normalize(samplePos - origin);
+			kernel.x = cos(lat) * cos(lon);
+			kernel.z = cos(lat) * sin(lon);
+			kernel.y = sin(lat);
+			kernel.xyz = normalize(kernel.xyz + normal.xyz);
 
-		float depthDiff = actualSamplePos.z - samplePos.z;
+			sampleLength = radius * mod(fiN, 0.07) / 0.07;
+			samplePos = origin + kernel * sampleLength;
+			samplePosProj = ProjectBack(samplePos);
 
-		if (depthDiff > 0.0 && depthDiff < zThickness)
-		{
-			//aoAccum += 1.0 * saturate(depthDiff * 100.0) * saturate(1.0 - depthDiff * 0.25 / (sampleLength + 0.001));
-			float aow = 1.35 * saturate(dot(sampleVector, normal));
-			//aow *= saturate(dot(sampleVector, upVector) * 0.5 + 0.5) * 1.5 + 0.0;
-			aoAccum += aow;
-			//aoAccum += 1.0 * saturate(dot(kernel, upVector));
-			//aoMul *= mix(1.0, 0.0, saturate(dot(kernel, upVector)));
-			//aoMul *= 0.45;
-		}
-	}
+			actualSamplePos = GetScreenSpacePosition(samplePosProj.xy, GetDepth(samplePosProj.xy)).xyz;
+			sampleVector = normalize(samplePos - origin);
+			depthDiff = actualSamplePos.z - samplePos.z;
 
-	aoAccum /= numRays;
+			aoAccum += saturate(dot(sampleVector, normal)) * (1.0 - step(depthDiff, 0.0)) * (1.0 - (zThickness, depthDiff));
 
-	float ao = 1.0 - aoAccum;
-	ao = pow(ao, 1.5025);
 
-	return ao;
+	float ao = 1.0 - aoAccum * 0.675;
+	return pow(ao, 1.5025);
 }
 
 vec4 GetLight(in vec2 screenCoord, in float range, in float quality, vec3 noisePattern)
@@ -296,8 +294,6 @@ vec4 GetLight(in vec2 screenCoord, in float range, in float quality, vec3 noiseP
 	float shadowMult = 0.0f;														//Multiplier used to fade out shadows at distance
 	float shad = 0.0f;
 	vec3 fakeIndirect = vec3(0.0f);
-
-	float fakeLargeAO = 0.0;
 
 
 	float mcSkylight = GetSkylight(screenCoord) * 0.8 + 0.2;
@@ -340,8 +336,6 @@ vec4 GetLight(in vec2 screenCoord, in float range, in float quality, vec3 noiseP
 				vec3 samplePos = vec3(coord.x, coord.y, depthSample);
 
 
-					fakeLargeAO += saturate((worldposition.z - samplePos.z) * 1000.0);
-					//fakeLargeAO += saturate((worldposition.z - samplePos.z) * 1000.0) * saturate(1.0 - abs(worldposition.z - samplePos.z) * 5.0);
 
 
 				vec3 lightVector = normalize(samplePos.xyz - worldposition.xyz);
@@ -426,21 +420,15 @@ vec4 GetLight(in vec2 screenCoord, in float range, in float quality, vec3 noiseP
 
 					fakeIndirect += colorSample * weight * distanceWeight * NdotL * skylightWeight;
 					//fakeIndirect += skylightWeight * weight * distanceWeight * NdotL;
-					//fakeLargeAO += aoDistanceWeight * NdotL;
 				}
 				c += 1;
 			}
 		}
 
 		fakeIndirect /= c;
-		fakeLargeAO /= c;
-		fakeLargeAO = clamp(1.0 - fakeLargeAO * 0.8, 0.0, 1.0);
-		// fakeLargeAO = pow(fakeLargeAO, 2.0);
 	}
 
 	fakeIndirect = mix(vec3(0.0f), fakeIndirect, vec3(shadowMult));
-
-	//fakeIndirect /= fakeLargeAO;
 
 	float ao = 1.0f;
 	bool isSky = GetSkyMask(screenCoord.st);
@@ -452,8 +440,6 @@ vec4 GetLight(in vec2 screenCoord, in float range, in float quality, vec3 noiseP
 	#endif
 
 	fakeIndirect.rgb *= ao;
-
-	//ao *= fakeLargeAO;
 
 
 	//fakeIndirect.rgb = vec3(mcSkylight / 1150.0);
@@ -626,10 +612,8 @@ void main() {
 
 	//UV
 	float zoom = 1.0f / GI_RESOLUTION_REDUCTION;
-	if (zoom < 0.0f || zoom > 1.0f)
-	{
-		zoom = 1.0f;
-	}
+	float ava = 2.0 - step(0.0, zoom) - step(zoom, 1.0);
+	zoom = ava + (1 - ava) * zoom;
 
 	vec2 coord = texcoord.st / sqrt(zoom);
 

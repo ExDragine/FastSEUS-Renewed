@@ -126,11 +126,11 @@ void main()
 
 	for (int i = 0; i < latSamples; i++)
 	{
-		float latitude = (float(i) / float(latSamples)) * 3.14159265;
+		float latitude = (float(i) / float(latSamples)) * PI;
 			  latitude = latitude;
 		for (int j = 0; j < lonSamples; j++)
 		{
-			float longitude = (float(j) / float(lonSamples)) * 3.14159265 * 2.0;
+			float longitude = (float(j) / float(lonSamples)) * PI * 2.0;
 
 			vec3 kernel;
 			kernel.x = cos(latitude) * cos(longitude);

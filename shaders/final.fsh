@@ -116,19 +116,6 @@ const mat3 coneOverlapInverse = mat3(	1.0 + (rgOverlap + rbOverlap), 			-rgOverl
 
 
 
-// float almostIdentity( float x, float m, float n )
-// {
-//     if( x>m ) return x;
-
-//     float a = 2.0*n - m;
-//     float b = 2.0*m - 3.0*n;
-//     float t = x/m;
-
-//     return (a*t + b)*t*t + n;
-// }
-
-
-
 
 
 
@@ -148,23 +135,8 @@ vec3 SEUSTonemap(vec3 color)
 	color = pow(color, vec3(1.0 / p));
 
 
-	// color = mix(color, color * color * (3.0 - 2.0 * color), vec3(0.0));
-
-	//color = pow(color, vec3(1.0 / 2.0));
-	//color = mix(color, color * color * (3.0 - 2.0 * color), vec3(0.1));
-	//color = pow(color, vec3(2.0));
-
-	//color = color * 0.5 + 0.5;
-	//color = mix(color, color * color * (3.0 - 2.0 * color), vec3(0.8));
-	//color = saturate(color * 2.0 - 1.0);
-
 	color = color * coneOverlapInverse;
 	color = saturate(color);
-
-
-	// color.r = almostIdentity(color.r, 0.05, 0.0);
-	// color.g = almostIdentity(color.g, 0.05, 0.0);
-	// color.b = almostIdentity(color.b, 0.05, 0.0);
 
 	return color;
 }
@@ -176,9 +148,7 @@ vec3 SEUSTonemap(vec3 color)
 vec3 HableTonemap(vec3 x)
 {
 	
-	x = x * coneOverlap;
-
-	x *= 1.5;
+	x *= coneOverlap * 1.5;
 
 	const float A = 0.15;
 	const float B = 0.50;
@@ -192,10 +162,7 @@ vec3 HableTonemap(vec3 x)
    	vec3 result = pow((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F), vec3(1.0 / TONEMAP_CURVE))-E/F;
    	result = saturate(result);
 
-
-   	result = result * coneOverlapInverse;
-
-   	return result;
+   	return result * coneOverlapInverse;
 }
 /////////////////////////////////////////////////////////////////////////////////
 
@@ -206,22 +173,20 @@ vec3 HableTonemap(vec3 x)
 vec3 RRTAndODTFit(vec3 v)
 {
     vec3 a = v * (v + 0.0245786f) - 0.000090537f;
-    vec3 b = v * (1.0f * v + 0.4329510f) + 0.238081f;
+    vec3 b = v * (v + 0.4329510f) + 0.238081f;
     return a / b;
 }
 
 vec3 ACESTonemap2(vec3 color)
 {
-	color *= 1.5;
-	color = color * coneOverlap;
+	color *= coneOverlap * 1.5;
 
     // Apply RRT and ODT
     color = RRTAndODTFit(color);
 
 
     // Clamp to [0, 1]
-	color = color * coneOverlapInverse;
-    color = saturate(color);
+    color = saturate(color * coneOverlapInverse);
 
     return color;
 }
@@ -243,9 +208,7 @@ vec3 ACESTonemap(vec3 color)
 
 	color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);
 
-	color = color * coneOverlapInverse;
-
-	color = saturate(color);
+	color = saturate(color * coneOverlapInverse);
 
 
 	return color;
@@ -260,19 +223,9 @@ vec3 Tonemap2(vec3 color)
 	color = color / (1.0 + color);
 	color = pow(color, vec3(1.0 / p));
 
-
-	color = mix(color, color * color * (3.0 - 2.0 * color), vec3(0.0));
-
-	color = pow(color, vec3(1.0 / 2.0));
+	color = sqrt(color);
 	color = mix(color, color * color * (3.0 - 2.0 * color), vec3(0.1));
-	color = pow(color, vec3(2.0));
-
-	//color = color * 0.5 + 0.5;
-	//color = mix(color, color * color * (3.0 - 2.0 * color), vec3(0.8));
-	//color = saturate(color * 2.0 - 1.0);
-
-
-
+	color *= color;
 
 
 
@@ -287,7 +240,7 @@ vec3 	CalculateNoisePattern1(vec2 offset, float size)
 
 	coord *= vec2(viewWidth, viewHeight);
 	coord = mod(coord + offset, vec2(size));
-	coord /= 64.0;
+	coord *= 0.015625;
 
 	return texture2D(noisetex, coord).xyz;
 }
@@ -295,10 +248,8 @@ vec3 	CalculateNoisePattern1(vec2 offset, float size)
 vec3 GetBloom(vec2 coord)
 {
 	float zoom = 1.0f / BLOOM_RESOLUTION_REDUCTION;
-	if (zoom < 0.0f || zoom > 1.0f)
-	{
-		zoom = 1.0f;
-	}
+	float ava = 2.0 - step(0.0, zoom) - step(zoom, 1.0);
+	zoom = ava + (1 - ava) * zoom;
 	
 	vec2 bloomCoord = coord.st * sqrt(zoom);
 	vec3 bloomColor = GammaToLinear(texture2DLod(gaux1, bloomCoord, 0.0625).rgb);
@@ -324,33 +275,17 @@ void CalculateExposureEyeBrightness(inout vec3 color)
 
 void AverageExposure(inout vec3 color)
 {
-	float avglod = int(log2(min(viewWidth, viewHeight))) - 0;
-	//color /= pow(Luminance(texture2DLod(gaux3, vec2(0.5, 0.5), avglod).rgb), 1.18) * 1.2 + 0.00000005;
+	float avglod = int(log2(min(viewWidth, viewHeight)));
 
 	float avgLumPow = 1.1;
 	float exposureMax = 0.9;
 	float exposureMin = 0.00005;
 
-	color /= pow(Luminance(texture2DLod(gaux3, vec2(0.5, 0.5), avglod).rgb), avgLumPow) * exposureMax + exposureMin;
+	color /= pow(Luminance(texture2DLod(gaux3, vec2(0.5), avglod).rgb), avgLumPow) * exposureMax + exposureMin;
 }
 
 void MicroBloom(inout vec3 color, in vec2 uv)
 {
-	/*
-	vec2 texel = vec2(1.0 / viewWidth, 1.0 / viewHeight);
-	vec3 sum = GetColorTexture(texcoord.st + vec2(0.5, -0.5) * texel * 0.9).rgb;
-		 sum += GetColorTexture(texcoord.st + vec2(0.5, 0.5) * texel * 0.9).rgb;
-		 sum += GetColorTexture(texcoord.st + vec2(-0.5, 0.5) * texel * 0.9).rgb;
-		 sum += GetColorTexture(texcoord.st + vec2(-0.5, -0.5) * texel * 0.9).rgb;
-
-	vec3 sum2 = GetColorTexture(texcoord.st + vec2(0.5, -0.5) * texel * 1.9).rgb;
-		 sum2 += GetColorTexture(texcoord.st + vec2(0.5, 0.5) * texel * 1.9).rgb;
-		 sum2 += GetColorTexture(texcoord.st + vec2(-0.5, 0.5) * texel * 1.9).rgb;
-		 sum2 += GetColorTexture(texcoord.st + vec2(-0.5, -0.5) * texel * 1.9).rgb;
-
-	color += sum * 0.1 * 0.75;
-	color += sum2 * 0.05 * 0.75;
-	*/
 
 	vec3 bloom = vec3(0.0);
 	float allWeights = 0.0f;
@@ -361,22 +296,17 @@ void MicroBloom(inout vec3 color, in vec2 uv)
 		{
 			float weight = 1.0f - distance(vec2(i, j), vec2(2.5f)) / 2.5;
 				  weight = clamp(weight, 0.0f, 1.0f);
-				  weight = 1.0f - cos(weight * 3.1415 / 2.0f);
+				  weight = 1.0f - cos(weight * PI / 2.0f);
 				  weight = pow(weight, 2.0f);
-			vec2 coord = vec2(i - 2.5, j - 2.5);
-				 coord.x /= viewWidth;
-				 coord.y /= viewHeight;
-				 //coord *= 0.0f;
+			vec2 coord  = vec2(i - 2.5, j - 2.5);
+				 coord /= vec2(viewWidth, viewHeight);
 
-				 //coord.x -= 0.5f / viewWidth;
-				 //coord.y -= 0.5f / viewHeight;
-
-			vec2 finalCoord = (uv.st + coord.st * 1.0);
+			vec2 finalCoord = (uv.st + coord.st);
 
 			if (weight > 0.0f)
 			{
-				bloom += pow(clamp(texture2DLod(gaux3, finalCoord, 0).rgb, vec3(0.0f), vec3(1.0f)), vec3(2.2f)) * weight;
-				allWeights += 1.0f * weight;
+				bloom += pow(saturate(texture2DLod(gaux3, finalCoord, 0).rgb), vec3(2.2f)) * weight;
+				allWeights += weight;
 			}
 		}
 	}
@@ -389,15 +319,13 @@ void 	Vignette(inout vec3 color) {
 	float dist = distance(texcoord.st, vec2(0.5f)) * 2.0f;
 		  dist /= 1.5142f;
 
-		  //dist = pow(dist, 1.1f);
-
 	color.rgb *= 1.0f - dist * 0.5;
 
 }
 
 void DoNightEye(inout vec3 color)
 {
-	float lum = Luminance(color * vec3(1.0, 1.0, 1.0));
+	float lum = Luminance(color);
 	float mixSize = 1250000.0;
 	float mixFactor = 0.01 / (pow(lum * mixSize, 2.0) + 0.01);
 
@@ -415,13 +343,13 @@ void Overlay(inout vec3 color, vec3 overlayColor)
 	{
 		if (color[i] > 0.5)
 		{
-			float valueUnit = (1.0 - color[i]) / 0.5;
-			float minValue = color[i] - (1.0 - color[i]);
-			overlay[i] = (overlayColor[i] * valueUnit) + minValue;
+			float valueUnit = (1.0 - color[i]) * 2.0;
+			float minValue = color[i] * 2.0 - 1.0;
+			overlay[i] = overlayColor[i] * valueUnit + minValue;
 		}
 		else
 		{
-			float valueUnit = color[i] / 0.5;
+			float valueUnit = color[i] * 2.0;
 			overlay[i] = overlayColor[i] * valueUnit;
 		}
 	}
@@ -433,16 +361,12 @@ void Overlay(inout vec3 color, vec3 overlayColor)
 /////////////////////////MAIN//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void main() {
 
-	// vec2 coord = (floor(texcoord.st * vec2(viewWidth, viewHeight) * 0.25) + 0.5) / (vec2(viewWidth, viewHeight) * 0.25);
 	vec2 coord = texcoord.st;
 
-	vec3 color = GammaToLinear(texture2DLod(gaux3, coord.st, 0).rgb);
+	vec3 color = GammaToLinear(texture2D(gaux3, coord.st).rgb);
 
 
 	color = mix(color, GetBloom(coord.st), vec3(0.16 * BLOOM_AMOUNT + isEyeInWater * 0.7));
-	//color = GammaToLinear(texture2D(gaux1, coord.st).rgb);
-
-	//color = mix(color, vec3(Luminance(color)), vec3(0.02));
 
 	//CalculateExposureEyeBrightness(color);
 
@@ -470,7 +394,7 @@ void main() {
 	color = saturate(color * (1.0 + WHITE_CLIP));
 
 
-	color = pow(color, vec3(1.0 / 2.2));
+	color = LinearToGamma(color);
 	color = pow(color, vec3((1.0 / GAMMA)));
 
 
@@ -482,11 +406,6 @@ void main() {
 
 	color += rand(coord.st) * (1.0 / 255.0);
 
-
-
-	// color = (floor(color * 16.0)) / 16.0;
-
-	// color = texture2D(shadowcolor1, texcoord.st).aaa;
 
 
 	gl_FragColor = vec4(color.rgb, 1.0f);

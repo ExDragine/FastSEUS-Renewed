@@ -76,7 +76,7 @@ uniform float frameTime;
 
 vec3 GetColorTexture(vec2 coord)
 {
-	return pow(texture2DLod(gaux3, coord, 0).rgb, vec3(2.2));
+	return GammaToLinear(texture2DLod(gaux3, coord, 0.0).rgb);
 }
 
 float GetDepth(vec2 coord)
@@ -84,35 +84,14 @@ float GetDepth(vec2 coord)
 	return texture2D(gdepthtex, coord).x;
 }
 
-vec2 GetNearFragment(vec2 coord, float depth)
-{
-	vec2 texel = 1.0 / vec2(viewWidth, viewHeight);
-	vec4 depthSamples;
-	depthSamples.x = texture2D(gdepthtex, coord + texel * vec2(1.0, 1.0)).x;
-	depthSamples.y = texture2D(gdepthtex, coord + texel * vec2(1.0, -1.0)).x;
-	depthSamples.z = texture2D(gdepthtex, coord + texel * vec2(-1.0, 1.0)).x;
-	depthSamples.w = texture2D(gdepthtex, coord + texel * vec2(-1.0, -1.0)).x;
-
-	vec2 targetFragment = vec2(0.0, 0.0);
-
-	if (depthSamples.x < depth)
-		targetFragment = vec2(1.0, 1.0);
-	if (depthSamples.y < depth)
-		targetFragment = vec2(1.0, -1.0);
-	if (depthSamples.z < depth)
-		targetFragment = vec2(-1.0, 1.0);
-	if (depthSamples.w < depth)
-		targetFragment = vec2(-1.0, -1.0);
-
-	return coord + texel * targetFragment;
-}
-
 void 	MotionBlur(inout vec3 color) {
 	float depth = GetDepth(texcoord.st);
 
-	//vec2 nearFragment = GetNearFragment(texcoord.st, depth);
-	//depth = GetDepth(nearFragment);
-
+	if (depth < 0.7)
+	{
+		color.rgb = GetColorTexture(texcoord.st).rgb;
+		return;
+	}
 
 
 	vec4 currentPosition = vec4(texcoord.x * 2.0f - 1.0f, texcoord.y * 2.0f - 1.0f, 2.0f * depth - 1.0f, 1.0f);
@@ -132,31 +111,25 @@ void 	MotionBlur(inout vec3 color) {
 	float maxVelocity = 0.05f;
 		 velocity = clamp(velocity, vec2(-maxVelocity), vec2(maxVelocity));
 
-
-	if (depth < 0.7)
-	{
-		velocity *= 0.0;
-	}
-
 	//bool isHand = GetMaterialMask(texcoord.st, 5);
 	//velocity *= 1.0f - float(isHand);
 
 	int samples = 0;
 
-	float dither = rand(texcoord.st).x * 1.0;
+	float dither = rand(texcoord.st).x;
 
 	color.rgb = vec3(0.0f);
 
-	for (int i = -2; i <= 2; ++i) {
-		vec2 coord = texcoord.st + velocity * (float(i + dither) / 2.0);
-			 //coord += vec2(dither) * 1.0f * velocity;
+	{
+		vec2 coord = texcoord.st + velocity * (dither - 0.5) * 0.5;
+		float checker = step(0.0, coord.x) * step(coord.x, 1.0) * step(0.0, coord.y) * step(coord.y, 1.0);
+		color += GetColorTexture(coord).rgb * checker;
+		samples += int(checker);
 
-		if (coord.x > 0.0f && coord.x < 1.0f && coord.y > 0.0f && coord.y < 1.0f) {
-
-			color += GetColorTexture(coord).rgb;
-			samples += 1;
-
-		}
+		coord = texcoord.st + velocity * (dither + 0.5) * 0.5;
+		checker = step(0.0, coord.x) * step(coord.x, 1.0) * step(0.0, coord.y) * step(coord.y, 1.0);
+		color += GetColorTexture(coord).rgb * checker;
+		samples += int(checker);
 	}
 
 	color.rgb /= samples;
@@ -273,10 +246,8 @@ void main() {
 	#endif
 
 	float zoom = 1.0f / BLOOM_RESOLUTION_REDUCTION;
-	if (zoom < 0.0f || zoom > 1.0f)
-	{
-		zoom = 1.0f;
-	}
+	float ava = 2.0 - step(0.0, zoom) - step(zoom, 1.0);
+	zoom = ava + (1 - ava) * zoom;
 
 	vec2 bloomCoord = texcoord.st / sqrt(zoom);
 
